@@ -4,9 +4,12 @@ import json
 import chess
 import chess.pgn
 import chess.engine
+import threading
 from flask import Flask, render_template, request, redirect, url_for, session
+from werkzeug.security import generate_password_hash, check_password_hash
 
 DATABASE_DIR = 'database'
+USERS_FILE = os.path.join(DATABASE_DIR, 'users.json')
 STOCKFISH_PATH = './stockfish'
 ANALYSIS_DEPTH = 10
 OPENING_MOVES_LIMIT = 6
@@ -22,6 +25,19 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE_MB * 1024 * 1024
 
 def user_dir():
     return os.path.join(DATABASE_DIR, session['username'])
+
+
+def load_users():
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE) as f:
+            return json.load(f)
+    return {}
+
+
+def save_users(users):
+    os.makedirs(DATABASE_DIR, exist_ok=True)
+    with open(USERS_FILE, 'w') as f:
+        json.dump(users, f)
 
 
 def clean_and_merge_pgn(file_storage, dest_path):
@@ -104,6 +120,19 @@ def analyze_pgn(paths):
     return final_list
 
 
+def analyze_async(paths, analysis_file, flag_file):
+    """Run analyze_pgn in a background thread and remove the flag when done."""
+
+    def task():
+        mistakes = analyze_pgn(paths)
+        with open(analysis_file, 'w') as f:
+            json.dump(mistakes, f)
+        if os.path.exists(flag_file):
+            os.remove(flag_file)
+
+    threading.Thread(target=task, daemon=True).start()
+
+
 @app.route('/')
 def home():
     if 'username' in session:
@@ -111,14 +140,47 @@ def home():
     return redirect(url_for('login'))
 
 
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form['username']
+        email = request.form['email']
+        password = request.form['password']
+        users = load_users()
+        if username in users:
+            return render_template('register.html', error='Username already exists')
+        users[username] = {
+            'email': email,
+            'password': generate_password_hash(password)
+        }
+        save_users(users)
+        session['username'] = username
+        session['email'] = email
+        os.makedirs(user_dir(), exist_ok=True)
+        return redirect(url_for('upload'))
+    return render_template('register.html')
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        session['username'] = request.form['username']
-        session['email'] = request.form['email']
-        os.makedirs(user_dir(), exist_ok=True)
-        return redirect(url_for('upload'))
+        username = request.form['username']
+        password = request.form['password']
+        users = load_users()
+        user = users.get(username)
+        if user and check_password_hash(user['password'], password):
+            session['username'] = username
+            session['email'] = user['email']
+            os.makedirs(user_dir(), exist_ok=True)
+            return redirect(url_for('upload'))
+        return render_template('login.html', error='Invalid credentials')
     return render_template('login.html')
+
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
 
 
 @app.route('/upload', methods=['GET', 'POST'])
@@ -147,6 +209,7 @@ def train():
     user_pgn_white = os.path.join(user_dir(), f"{session['username']}_white.pgn")
     user_pgn_black = os.path.join(user_dir(), f"{session['username']}_black.pgn")
     analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
+    processing_flag = os.path.join(user_dir(), 'analysis.processing')
     if request.method == 'POST':
         paths = []
         if os.path.exists(user_pgn_white):
@@ -154,9 +217,8 @@ def train():
         if os.path.exists(user_pgn_black):
             paths.append(user_pgn_black)
         if paths:
-            mistakes = analyze_pgn(paths)
-            with open(analysis_file, 'w') as f:
-                json.dump(mistakes, f)
+            open(processing_flag, 'w').close()
+            analyze_async(paths, analysis_file, processing_flag)
         return redirect(url_for('analysis'))
     return render_template('train.html')
 
@@ -166,11 +228,15 @@ def analysis():
     if 'username' not in session:
         return redirect(url_for('login'))
     analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
+    processing_flag = os.path.join(user_dir(), 'analysis.processing')
     mistakes = []
+    processing = False
     if os.path.exists(analysis_file):
         with open(analysis_file) as f:
             mistakes = json.load(f)
-    return render_template('analysis.html', mistakes=mistakes)
+    elif os.path.exists(processing_flag):
+        processing = True
+    return render_template('analysis.html', mistakes=mistakes, processing=processing)
 
 
 if __name__ == '__main__':

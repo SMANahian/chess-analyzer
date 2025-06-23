@@ -1,38 +1,31 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Analysis</title>
-    <link rel="stylesheet" href="assets/css/chessboard.css"/>
-    <style>
-        body { font-family: sans-serif; max-width: 900px; margin:auto; padding:2em; }
-        .board { width: 300px; height: 300px; }
-        #controls { margin-top: 1em; }
-    </style>
-</head>
-<body>
+{% extends 'base.html' %}
+{% block content %}
+{% if processing %}
+<p>Analysis is being processed. Please reload this page later.</p>
+{% elif not mistakes %}
+<p>No analysis available. Run training first.</p>
+{% else %}
 <h1>Training Board</h1>
-<div id="board" class="board"></div>
-<div id="info"></div>
-<input id="moveInput" placeholder="e2e4">
-<button onclick="checkMove()">Check Move</button>
-<div id="controls">
-  <button onclick="prev()">Previous</button>
-  <button onclick="next()">Next</button>
+<iframe id="board" frameborder="0" style="width:100%; aspect-ratio:4/3;"></iframe>
+<div id="info" class="my-2"></div>
+<div class="input-group mb-3" style="max-width:200px;">
+  <input id="moveInput" class="form-control" placeholder="e2e4">
+  <button class="btn btn-outline-secondary" onclick="checkMove()">Check Move</button>
 </div>
-<script src="assets/js/jquery-3.6.0.min.js"></script>
-<script src="assets/js/chessboard.js"></script>
+<div id="controls" class="mb-3">
+  <button class="btn btn-secondary" onclick="prev()">Previous</button>
+  <button class="btn btn-secondary" onclick="next()">Next</button>
+</div>
 <script>
 const mistakes = {{ mistakes|tojson }};
 let index = 0;
-const board = Chessboard('board', {
-    position: mistakes.length ? mistakes[0].fen : 'start',
-    pieceTheme: 'img/chesspieces/wikipedia/{piece}.png'
-});
 function show(){
     if(!mistakes.length) return;
     const m = mistakes[index];
-    board.position(m.fen);
+    const orientation = m.fen.split(' ')[1] === 'w' ? 'white' : 'black';
+    const fenParam = m.fen.replace(/ /g, '_');
+    document.getElementById('board').src =
+        `https://lichess.org/embed/analysis?fen=${fenParam}&color=${orientation}`;
     document.getElementById("info").innerHTML = `<p>Frequency: ${m.game_count}</p><p>Your move: ${m.user_move}</p>`;
     document.getElementById("moveInput").value = "";
 }
@@ -47,5 +40,5 @@ function prev(){ if(index>0){ index--; show(); } }
 function next(){ if(index < mistakes.length-1){ index++; show(); } }
 show();
 </script>
-</body>
-</html>
+{% endif %}
+{% endblock %}
