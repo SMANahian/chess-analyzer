@@ -12,10 +12,9 @@
 <nav class="navbar navbar-dark bg-dark fixed-top">
   <div class="container-fluid">
     <a class="navbar-brand" href="{{ url_for('home') }}">Chess Analyzer</a>
-    <div>
-      <ul class="navbar-nav flex-row">
+    <ul class="navbar-nav flex-row ms-auto align-items-center">
       {% if session.get('username') %}
-        <li class="nav-item me-3 mt-2 text-white">Hello {{ session.username }}</li>
+        <li class="nav-item me-3 text-white">Hello {{ session.username }}</li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('upload') }}">Upload</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('train') }}">Train</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('analysis') }}">Analysis</a></li>
@@ -24,8 +23,7 @@
         <li class="nav-item"><a class="nav-link" href="{{ url_for('login') }}">Login</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('register') }}">Register</a></li>
       {% endif %}
-      </ul>
-    </div>
+    </ul>
   </div>
 </nav>
 <div class="container mt-4">
