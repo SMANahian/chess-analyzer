@@ -5,7 +5,7 @@ import chess
 import chess.pgn
 import chess.engine
 import threading
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, render_template, render_template_string, request, redirect, url_for, session
 from werkzeug.security import generate_password_hash, check_password_hash
 
 DATABASE_DIR = 'database'
@@ -185,7 +185,13 @@ def analyze_async(paths, analysis_file, flag_file, color):
 def home():
     if 'username' in session:
         return redirect(url_for('upload'))
-    return render_template('home.html')
+    return render_template_string(
+        """{% extends 'base.html' %}{% block content %}
+<h1>Welcome to Chess Analyzer</h1>
+<p>Use <a href='https://www.openingtree.com/' target='_blank'>OpeningTree</a> to create your PGN files and then upload them here.</p>
+<p>This project was created by vibecoding with ChatGPT Codex.</p>
+{% endblock %}"""
+    )
 
 
 @app.route('/register', methods=['GET', 'POST'])
