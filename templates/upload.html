@@ -11,10 +11,13 @@
 </head>
 <body>
     <h1>Welcome {{ username }}</h1>
-    <p>Upload a <strong>.pgn</strong> file containing your games.</p>
+    <p>Upload your games played as White and Black. At least one file is required.</p>
     <div class="container">
         <form action="/upload" method="post" enctype="multipart/form-data">
-            <input type="file" name="pgn_file" required>
+            <label>White games: <input type="file" name="white_pgn_file"></label>
+            <br>
+            <label>Black games: <input type="file" name="black_pgn_file"></label>
+            {% if error %}<p style="color:red">{{ error }}</p>{% endif %}
             <br>
             <input type="submit" value="Upload">
         </form>

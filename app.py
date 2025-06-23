@@ -121,13 +121,20 @@ def login():
 def upload():
     if 'username' not in session:
         return redirect(url_for('login'))
+    error = None
     if request.method == 'POST':
-        file = request.files.get('pgn_file')
-        if file and file.filename.lower().endswith('.pgn'):
+        white_file = request.files.get('white_pgn_file')
+        black_file = request.files.get('black_pgn_file')
+        if not (white_file and white_file.filename) and not (black_file and black_file.filename):
+            error = 'Please upload at least one PGN file.'
+        else:
             dest = os.path.join(user_dir(), f"{session['username']}.pgn")
-            clean_and_merge_pgn(file, dest)
+            if white_file and white_file.filename.lower().endswith('.pgn'):
+                clean_and_merge_pgn(white_file, dest)
+            if black_file and black_file.filename.lower().endswith('.pgn'):
+                clean_and_merge_pgn(black_file, dest)
             return redirect(url_for('train'))
-    return render_template('upload.html', username=session.get('username'))
+    return render_template('upload.html', username=session.get('username'), error=error)
 
 
 @app.route('/train', methods=['GET', 'POST'])
