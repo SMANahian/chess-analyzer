@@ -27,7 +27,7 @@ const mistakes = {{ mistakes|tojson }};
 let index = 0;
 const board = Chessboard('board', {
     position: mistakes.length ? mistakes[0].fen : 'start',
-    pieceTheme: 'https://cdn.jsdelivr.net/npm/chessboardjs@0.0.1/www/img/chesspieces/wikipedia/{piece}.png'
+    pieceTheme: 'img/chesspieces/wikipedia/{piece}.png'
 });
 function show(){
     if(!mistakes.length) return;
