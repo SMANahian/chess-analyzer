@@ -93,7 +93,7 @@ def analyze_pgn(paths):
                 for i, move in enumerate(game.mainline_moves()):
                     if i >= OPENING_MOVES_LIMIT:
                         break
-                    key = (board.fen(), move.uci())
+                    key = (board.shredder_fen(), move.uci())
                     pair_counts[key] = pair_counts.get(key, 0) + 1
                     board.push(move)
 
@@ -111,7 +111,7 @@ def analyze_pgn(paths):
                     if i >= OPENING_MOVES_LIMIT:
                         break
                     fen = board.fen()
-                    key = (fen, move.uci())
+                    key = (board.shredder_fen(), move.uci())
                     if pair_counts.get(key, 0) < MIN_PAIR_OCCURRENCES:
                         board.push(move)
                         continue
