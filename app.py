@@ -47,49 +47,53 @@ def clean_and_merge_pgn(file_storage, dest_path):
             f.write(g + '\n\n')
 
 
-def analyze_pgn(path):
+def analyze_pgn(paths):
+    """Analyze one or more PGN files and return a list of common mistakes."""
     mistakes = {}
     engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
-    with open(path) as pgn:
-        while True:
-            game = chess.pgn.read_game(pgn)
-            if game is None:
-                break
-            board = game.board()
-            for i, move in enumerate(game.mainline_moves()):
-                if i >= OPENING_MOVES_LIMIT:
+    for path in paths:
+        if not os.path.exists(path):
+            continue
+        with open(path) as pgn:
+            while True:
+                game = chess.pgn.read_game(pgn)
+                if game is None:
                     break
-                fen = board.fen()
-                try:
-                    infos = engine.analyse(board, chess.engine.Limit(depth=ANALYSIS_DEPTH), multipv=5)
-                except chess.engine.EngineError:
+                board = game.board()
+                for i, move in enumerate(game.mainline_moves()):
+                    if i >= OPENING_MOVES_LIMIT:
+                        break
+                    fen = board.fen()
+                    try:
+                        infos = engine.analyse(board, chess.engine.Limit(depth=ANALYSIS_DEPTH), multipv=5)
+                    except chess.engine.EngineError:
+                        board.push(move)
+                        continue
+                    best_score = infos[0]['score'].white().score(mate_score=10000)
+                    top_moves = []
+                    for info in infos:
+                        mv = info['pv'][0]
+                        mv_score = info['score'].white().score(mate_score=10000)
+                        if best_score - mv_score <= TOP_MOVE_THRESHOLD_CP:
+                            top_moves.append(mv.uci())
+                    score_before = best_score
                     board.push(move)
-                    continue
-                best_score = infos[0]['score'].white().score(mate_score=10000)
-                top_moves = []
-                for info in infos:
-                    mv = info['pv'][0]
-                    mv_score = info['score'].white().score(mate_score=10000)
-                    if best_score - mv_score <= TOP_MOVE_THRESHOLD_CP:
-                        top_moves.append(mv.uci())
-                score_before = best_score
-                board.push(move)
-                info_after = engine.analyse(board, chess.engine.Limit(depth=ANALYSIS_DEPTH))
-                score_after = info_after['score'].white().score(mate_score=10000)
-                is_white_turn = board.turn == chess.BLACK
-                cp_loss = score_before - score_after if is_white_turn else score_after - score_before
-                if cp_loss > MISTAKE_THRESHOLD_CP:
-                    key = (fen, move.uci())
-                    if key not in mistakes:
-                        mistakes[key] = {
-                            'fen': fen,
-                            'user_move': move.uci(),
-                            'top_moves': top_moves,
-                            'game_count': 0,
-                            'total_cp_loss': 0
-                        }
-                    mistakes[key]['game_count'] += 1
-                    mistakes[key]['total_cp_loss'] += cp_loss
+                    info_after = engine.analyse(board, chess.engine.Limit(depth=ANALYSIS_DEPTH))
+                    score_after = info_after['score'].white().score(mate_score=10000)
+                    is_white_turn = board.turn == chess.BLACK
+                    cp_loss = score_before - score_after if is_white_turn else score_after - score_before
+                    if cp_loss > MISTAKE_THRESHOLD_CP:
+                        key = (fen, move.uci())
+                        if key not in mistakes:
+                            mistakes[key] = {
+                                'fen': fen,
+                                'user_move': move.uci(),
+                                'top_moves': top_moves,
+                                'game_count': 0,
+                                'total_cp_loss': 0
+                            }
+                        mistakes[key]['game_count'] += 1
+                        mistakes[key]['total_cp_loss'] += cp_loss
     engine.quit()
     final_list = []
     for m in mistakes.values():
@@ -122,23 +126,35 @@ def upload():
     if 'username' not in session:
         return redirect(url_for('login'))
     if request.method == 'POST':
-        file = request.files.get('pgn_file')
-        if file and file.filename.lower().endswith('.pgn'):
-            dest = os.path.join(user_dir(), f"{session['username']}.pgn")
-            clean_and_merge_pgn(file, dest)
-            return redirect(url_for('train'))
-    return render_template('upload.html', username=session.get('username'))
+        white_file = request.files.get('white_pgn')
+        black_file = request.files.get('black_pgn')
+        if not white_file and not black_file:
+            return render_template('upload.html', username=session.get('username'), error='Please provide at least one PGN file.')
+        if white_file and white_file.filename.lower().endswith('.pgn'):
+            dest = os.path.join(user_dir(), f"{session['username']}_white.pgn")
+            clean_and_merge_pgn(white_file, dest)
+        if black_file and black_file.filename.lower().endswith('.pgn'):
+            dest = os.path.join(user_dir(), f"{session['username']}_black.pgn")
+            clean_and_merge_pgn(black_file, dest)
+        return redirect(url_for('train'))
+    return render_template('upload.html', username=session.get('username'), error=None)
 
 
 @app.route('/train', methods=['GET', 'POST'])
 def train():
     if 'username' not in session:
         return redirect(url_for('login'))
-    user_pgn = os.path.join(user_dir(), f"{session['username']}.pgn")
+    user_pgn_white = os.path.join(user_dir(), f"{session['username']}_white.pgn")
+    user_pgn_black = os.path.join(user_dir(), f"{session['username']}_black.pgn")
     analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
     if request.method == 'POST':
-        if os.path.exists(user_pgn):
-            mistakes = analyze_pgn(user_pgn)
+        paths = []
+        if os.path.exists(user_pgn_white):
+            paths.append(user_pgn_white)
+        if os.path.exists(user_pgn_black):
+            paths.append(user_pgn_black)
+        if paths:
+            mistakes = analyze_pgn(paths)
             with open(analysis_file, 'w') as f:
                 json.dump(mistakes, f)
         return redirect(url_for('analysis'))
