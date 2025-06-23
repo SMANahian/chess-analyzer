@@ -5,7 +5,7 @@
 {% elif not mistakes %}
 <p>No analysis available. Run training first.</p>
 {% else %}
-<h1>Training Board</h1>
+<h1>Training Board{% if color %} - {{ color|title }}{% endif %}</h1>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/chessboard.css') }}">
 <script src="{{ url_for('static', filename='js/jquery-3.6.0.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/chess.min.js') }}"></script>
@@ -53,6 +53,7 @@
 </div>
 <script>
 const mistakes = {{ mistakes|tojson }};
+const color = {{ color|tojson }};
 let index = 0;
 let board = null;
 let game = null;
@@ -141,7 +142,7 @@ function loadMistake(i) {
 
 function deleteMistake(i) {
   if (!confirm('Delete this mistake?')) return;
-  fetch(`/delete_mistake/${i}`, {method: 'POST'}).then(res => {
+  fetch(`/delete_mistake/${color}/${i}`, {method: 'POST'}).then(res => {
     if (res.ok) {
       mistakes.splice(i, 1);
       renderTable();

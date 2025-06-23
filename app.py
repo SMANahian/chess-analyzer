@@ -75,8 +75,8 @@ def clean_and_merge_pgns(files, dest_path):
     return total_games
 
 
-def analyze_pgn(paths):
-    """Analyze one or more PGN files and return a list of common mistakes."""
+def analyze_pgn(paths, color):
+    """Analyze PGN files and return common mistakes for the given color."""
     mistakes = {}
 
     # First pass: count how many times each (position, move) pair occurs
@@ -93,6 +93,12 @@ def analyze_pgn(paths):
                 for i, move in enumerate(game.mainline_moves()):
                     if i >= OPENING_MOVES_LIMIT:
                         break
+                    if color == 'white' and board.turn != chess.WHITE:
+                        board.push(move)
+                        continue
+                    if color == 'black' and board.turn != chess.BLACK:
+                        board.push(move)
+                        continue
                     key = (board.shredder_fen(), move.uci())
                     pair_counts[key] = pair_counts.get(key, 0) + 1
                     board.push(move)
@@ -111,6 +117,12 @@ def analyze_pgn(paths):
                     if i >= OPENING_MOVES_LIMIT:
                         break
                     fen = board.fen()
+                    if color == 'white' and board.turn != chess.WHITE:
+                        board.push(move)
+                        continue
+                    if color == 'black' and board.turn != chess.BLACK:
+                        board.push(move)
+                        continue
                     key = (board.shredder_fen(), move.uci())
                     if pair_counts.get(key, 0) < MIN_PAIR_OCCURRENCES:
                         board.push(move)
@@ -154,11 +166,11 @@ def analyze_pgn(paths):
     return final_list
 
 
-def analyze_async(paths, analysis_file, flag_file):
+def analyze_async(paths, analysis_file, flag_file, color):
     """Run analyze_pgn in a background thread and remove the flag when done."""
 
     def task():
-        mistakes = analyze_pgn(paths)
+        mistakes = analyze_pgn(paths, color)
         with open(analysis_file, 'w') as f:
             json.dump(mistakes, f)
         if os.path.exists(flag_file):
@@ -240,55 +252,91 @@ def upload():
 def clear_pgns():
     if 'username' not in session:
         return redirect(url_for('login'))
-    for suffix in ['_white.pgn', '_black.pgn', '_analysis.json']:
-        path = os.path.join(user_dir(), f"{session['username']}{suffix}")
+    files = [
+        f"{session['username']}_white.pgn",
+        f"{session['username']}_black.pgn",
+        f"{session['username']}_white_analysis.json",
+        f"{session['username']}_black_analysis.json",
+        'analysis_white.processing',
+        'analysis_black.processing',
+    ]
+    for name in files:
+        path = os.path.join(user_dir(), name)
         if os.path.exists(path):
             os.remove(path)
     return redirect(url_for('upload'))
 
 
-@app.route('/train', methods=['GET', 'POST'])
+@app.route('/train')
 def train():
     if 'username' not in session:
         return redirect(url_for('login'))
-    user_pgn_white = os.path.join(user_dir(), f"{session['username']}_white.pgn")
-    user_pgn_black = os.path.join(user_dir(), f"{session['username']}_black.pgn")
-    analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
-    processing_flag = os.path.join(user_dir(), 'analysis.processing')
-    if request.method == 'POST':
-        paths = []
-        if os.path.exists(user_pgn_white):
-            paths.append(user_pgn_white)
-        if os.path.exists(user_pgn_black):
-            paths.append(user_pgn_black)
-        if paths:
-            open(processing_flag, 'w').close()
-            analyze_async(paths, analysis_file, processing_flag)
-        return redirect(url_for('analysis'))
     return render_template('train.html')
+
+
+def start_analysis(color):
+    pgn_file = os.path.join(user_dir(), f"{session['username']}_{color}.pgn")
+    if not os.path.exists(pgn_file):
+        return False
+    analysis_file = os.path.join(user_dir(), f"{session['username']}_{color}_analysis.json")
+    flag_file = os.path.join(user_dir(), f"analysis_{color}.processing")
+    open(flag_file, 'w').close()
+    analyze_async([pgn_file], analysis_file, flag_file, color)
+    return True
+
+
+@app.route('/train_<color>', methods=['POST'])
+def train_color(color):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    if color == 'both':
+        if os.path.exists(os.path.join(user_dir(), f"{session['username']}_white.pgn")):
+            start_analysis('white')
+        if os.path.exists(os.path.join(user_dir(), f"{session['username']}_black.pgn")):
+            start_analysis('black')
+        return redirect(url_for('analysis'))
+    if start_analysis(color):
+        return redirect(url_for(f'analysis_{color}'))
+    return redirect(url_for('train'))
+
+
+def load_mistakes(color):
+    analysis_file = os.path.join(user_dir(), f"{session['username']}_{color}_analysis.json")
+    flag_file = os.path.join(user_dir(), f"analysis_{color}.processing")
+    if os.path.exists(analysis_file):
+        with open(analysis_file) as f:
+            return json.load(f), False
+    if os.path.exists(flag_file):
+        return [], True
+    return [], False
 
 
 @app.route('/analysis')
 def analysis():
     if 'username' not in session:
         return redirect(url_for('login'))
-    analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
-    processing_flag = os.path.join(user_dir(), 'analysis.processing')
     mistakes = []
     processing = False
-    if os.path.exists(analysis_file):
-        with open(analysis_file) as f:
-            mistakes = json.load(f)
-    elif os.path.exists(processing_flag):
-        processing = True
-    return render_template('analysis.html', mistakes=mistakes, processing=processing)
+    for color in ['white', 'black']:
+        m, p = load_mistakes(color)
+        mistakes.extend(m)
+        processing = processing or p
+    return render_template('analysis.html', mistakes=mistakes, processing=processing, color=None)
 
 
-@app.route('/delete_mistake/<int:index>', methods=['POST'])
-def delete_mistake(index):
+@app.route('/analysis_<color>')
+def analysis_color(color):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    mistakes, processing = load_mistakes(color)
+    return render_template('analysis.html', mistakes=mistakes, processing=processing, color=color)
+
+
+@app.route('/delete_mistake/<color>/<int:index>', methods=['POST'])
+def delete_mistake(color, index):
     if 'username' not in session:
         return ('', 403)
-    analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
+    analysis_file = os.path.join(user_dir(), f"{session['username']}_{color}_analysis.json")
     if not os.path.exists(analysis_file):
         return ('', 404)
     with open(analysis_file) as f:
