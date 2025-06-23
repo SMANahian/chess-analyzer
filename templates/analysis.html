@@ -11,13 +11,46 @@
 <script src="{{ url_for('static', filename='js/chess.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/chessboard.js') }}"></script>
 
-<div id="board" style="width:400px;"></div>
-<div id="info" class="my-2"></div>
-  <div id="controls" class="mb-3">
-    <button class="btn btn-secondary" onclick="prev()">Previous</button>
-    <button class="btn btn-secondary" onclick="next()">Next</button>
-    <button class="btn btn-danger" onclick="giveUp()">Give Up</button>
+<div class="row">
+  <div class="col-md-5">
+    <div id="board" style="width:100%;max-width:450px;margin:auto;"></div>
+    <div id="info" class="my-2"></div>
+    <div id="controls" class="mb-3">
+      <button class="btn btn-secondary" onclick="prev()">Previous</button>
+      <button class="btn btn-secondary" onclick="next()">Next</button>
+      <button class="btn btn-danger" onclick="giveUp()">Give Up</button>
+    </div>
   </div>
+  <div class="col-md-7">
+    <div class="table-responsive" style="max-height:400px;overflow-y:auto;">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Frequency</th>
+          <th>Avg CP Loss</th>
+          <th>Your Move</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="mistake-table">
+        {% for m in mistakes %}
+        <tr id="row-{{ loop.index0 }}">
+          <td>{{ loop.index }}</td>
+          <td>{{ m.game_count }}</td>
+          <td>{{ m.avg_cp_loss }}</td>
+          <td>{{ m.user_move }}</td>
+          <td>
+            <button class="btn btn-primary btn-sm" onclick="loadMistake({{ loop.index0 }})">Show</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteMistake({{ loop.index0 }})">Delete</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
 <script>
 const mistakes = {{ mistakes|tojson }};
 let index = 0;
@@ -45,15 +78,15 @@ function onDrop(source, target) {
   removeGreySquares();
   const move = game.move({from: source, to: target, promotion: 'q'});
   if (move === null) return 'snapback';
-  board.position(game.fen());
   const m = mistakes[index];
   const uci = move.from + move.to + (move.promotion ? move.promotion : '');
   if (m.top_moves.includes(uci)) {
+    board.position(game.fen());
     alert('Good move!');
   } else {
     alert('Not a top move. Try again.');
     game.undo();
-    board.position(game.fen());
+    return 'snapback';
   }
 }
 
@@ -70,6 +103,10 @@ function onMouseoutSquare(square, piece) {
   removeGreySquares();
 }
 
+function onSnapEnd() {
+  board.position(game.fen());
+}
+
 function show() {
   if (!mistakes.length) return;
   const m = mistakes[index];
@@ -79,6 +116,7 @@ function show() {
   board.position(m.fen, false);
   document.getElementById('info').innerHTML =
     `<p>Frequency: ${m.game_count}</p><p>Your move: ${m.user_move}</p>`;
+  highlightRow();
 }
 
 function prev() { if (index > 0) { index--; show(); } }
@@ -95,6 +133,48 @@ function giveUp() {
   alert('Best move: ' + best);
 }
 
+function loadMistake(i) {
+  if (i < 0 || i >= mistakes.length) return;
+  index = i;
+  show();
+}
+
+function deleteMistake(i) {
+  if (!confirm('Delete this mistake?')) return;
+  fetch(`/delete_mistake/${i}`, {method: 'POST'}).then(res => {
+    if (res.ok) {
+      mistakes.splice(i, 1);
+      renderTable();
+      if (index >= mistakes.length) index = mistakes.length - 1;
+      if (index < 0) index = 0;
+      show();
+    }
+  });
+}
+
+function highlightRow() {
+  document.querySelectorAll('#mistake-table tr').forEach(tr => tr.classList.remove('table-primary'));
+  const row = document.getElementById(`row-${index}`);
+  if (row) row.classList.add('table-primary');
+}
+
+function renderTable() {
+  const tbody = document.getElementById('mistake-table');
+  tbody.innerHTML = '';
+  mistakes.forEach((m, i) => {
+    const row = document.createElement('tr');
+    row.id = `row-${i}`;
+    row.innerHTML = `<td>${i+1}</td>`+
+      `<td>${m.game_count}</td>`+
+      `<td>${m.avg_cp_loss}</td>`+
+      `<td>${m.user_move}</td>`+
+      `<td><button class="btn btn-primary btn-sm" onclick="loadMistake(${i})">Show</button> `+
+      `<button class="btn btn-danger btn-sm" onclick="deleteMistake(${i})">Delete</button></td>`;
+    tbody.appendChild(row);
+  });
+  highlightRow();
+}
+
 $(function() {
   const config = {
     draggable: true,
@@ -102,9 +182,11 @@ $(function() {
     onDragStart: onDragStart,
     onDrop: onDrop,
     onMouseoutSquare: onMouseoutSquare,
-    onMouseoverSquare: onMouseoverSquare
+    onMouseoverSquare: onMouseoverSquare,
+    onSnapEnd: onSnapEnd
   };
   board = ChessBoard('board', config);
+  renderTable();
   show();
 });
 </script>

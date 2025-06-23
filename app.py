@@ -40,27 +40,38 @@ def save_users(users):
         json.dump(users, f)
 
 
-def clean_and_merge_pgn(file_storage, dest_path):
-    data = file_storage.read().decode('utf-8', 'ignore')
-    pgn_io = io.StringIO(data)
+def clean_and_merge_pgns(files, dest_path):
+    total_games = 0
+    total_size = 0
     games = []
-    for _ in range(MAX_GAMES_PER_UPLOAD):
-        game = chess.pgn.read_game(pgn_io)
-        if game is None:
+    for fs in files:
+        data_bytes = fs.read()
+        total_size += len(data_bytes)
+        if total_size > MAX_FILE_SIZE_MB * 1024 * 1024:
             break
-        board = game.board()
-        new_game = chess.pgn.Game()
-        node = new_game
-        for i, move in enumerate(game.mainline_moves()):
-            if i >= OPENING_MOVES_LIMIT:
+        data = data_bytes.decode('utf-8', 'ignore')
+        pgn_io = io.StringIO(data)
+        while total_games < MAX_GAMES_PER_UPLOAD:
+            game = chess.pgn.read_game(pgn_io)
+            if game is None:
                 break
-            node = node.add_variation(move)
-            board.push(move)
-        exporter = chess.pgn.StringExporter(headers=True, variations=False, comments=False)
-        games.append(new_game.accept(exporter))
+            board = game.board()
+            new_game = chess.pgn.Game()
+            node = new_game
+            for i, move in enumerate(game.mainline_moves()):
+                if i >= OPENING_MOVES_LIMIT:
+                    break
+                node = node.add_variation(move)
+                board.push(move)
+            exporter = chess.pgn.StringExporter(headers=True, variations=False, comments=False)
+            games.append(new_game.accept(exporter))
+            total_games += 1
+        if total_games >= MAX_GAMES_PER_UPLOAD:
+            break
     with open(dest_path, 'a') as f:
         for g in games:
             f.write(g + '\n\n')
+    return total_games
 
 
 def analyze_pgn(paths):
@@ -188,18 +199,29 @@ def upload():
     if 'username' not in session:
         return redirect(url_for('login'))
     if request.method == 'POST':
-        white_file = request.files.get('white_pgn')
-        black_file = request.files.get('black_pgn')
-        if not white_file and not black_file:
+        white_files = request.files.getlist('white_pgn')
+        black_files = request.files.getlist('black_pgn')
+        if not any(f.filename for f in white_files + black_files):
             return render_template('upload.html', username=session.get('username'), error='Please provide at least one PGN file.')
-        if white_file and white_file.filename.lower().endswith('.pgn'):
+        if white_files:
             dest = os.path.join(user_dir(), f"{session['username']}_white.pgn")
-            clean_and_merge_pgn(white_file, dest)
-        if black_file and black_file.filename.lower().endswith('.pgn'):
+            clean_and_merge_pgns([f for f in white_files if f.filename.lower().endswith('.pgn')], dest)
+        if black_files:
             dest = os.path.join(user_dir(), f"{session['username']}_black.pgn")
-            clean_and_merge_pgn(black_file, dest)
+            clean_and_merge_pgns([f for f in black_files if f.filename.lower().endswith('.pgn')], dest)
         return redirect(url_for('train'))
     return render_template('upload.html', username=session.get('username'), error=None)
+
+
+@app.route('/clear_pgns', methods=['POST'])
+def clear_pgns():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    for suffix in ['_white.pgn', '_black.pgn', '_analysis.json']:
+        path = os.path.join(user_dir(), f"{session['username']}{suffix}")
+        if os.path.exists(path):
+            os.remove(path)
+    return redirect(url_for('upload'))
 
 
 @app.route('/train', methods=['GET', 'POST'])
@@ -237,6 +259,22 @@ def analysis():
     elif os.path.exists(processing_flag):
         processing = True
     return render_template('analysis.html', mistakes=mistakes, processing=processing)
+
+
+@app.route('/delete_mistake/<int:index>', methods=['POST'])
+def delete_mistake(index):
+    if 'username' not in session:
+        return ('', 403)
+    analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
+    if not os.path.exists(analysis_file):
+        return ('', 404)
+    with open(analysis_file) as f:
+        mistakes = json.load(f)
+    if 0 <= index < len(mistakes):
+        mistakes.pop(index)
+        with open(analysis_file, 'w') as f:
+            json.dump(mistakes, f)
+    return ('', 204)
 
 
 if __name__ == '__main__':
