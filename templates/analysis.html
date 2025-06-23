@@ -5,7 +5,7 @@
 {% elif not mistakes %}
 <p>No analysis available. Run training first.</p>
 {% else %}
-<h1>Training Board</h1>
+<h1>Training Board{% if color %} - {{ color|title }}{% endif %}</h1>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/chessboard.css') }}">
 <script src="{{ url_for('static', filename='js/jquery-3.6.0.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/chess.min.js') }}"></script>
@@ -37,12 +37,14 @@
         {% for m in mistakes %}
         <tr id="row-{{ loop.index0 }}">
           <td>{{ loop.index }}</td>
-          <td>{{ m.game_count }}</td>
+          <td>{{ m.pair_count }}</td>
           <td>{{ m.avg_cp_loss }}</td>
           <td>{{ m.user_move }}</td>
           <td>
             <button class="btn btn-primary btn-sm" onclick="loadMistake({{ loop.index0 }})">Show</button>
+            {% if color %}
             <button class="btn btn-danger btn-sm" onclick="deleteMistake({{ loop.index0 }})">Delete</button>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -53,6 +55,7 @@
 </div>
 <script>
 const mistakes = {{ mistakes|tojson }};
+const color = {{ color|tojson }};
 let index = 0;
 let board = null;
 let game = null;
@@ -115,7 +118,7 @@ function show() {
   board.orientation(orientation);
   board.position(m.fen, false);
   document.getElementById('info').innerHTML =
-    `<p>Frequency: ${m.game_count}</p><p>Your move: ${m.user_move}</p>`;
+    `<p>Frequency: ${m.pair_count}</p><p>Your move: ${m.user_move}</p>`;
   highlightRow();
 }
 
@@ -141,7 +144,7 @@ function loadMistake(i) {
 
 function deleteMistake(i) {
   if (!confirm('Delete this mistake?')) return;
-  fetch(`/delete_mistake/${i}`, {method: 'POST'}).then(res => {
+  fetch(`/delete_mistake/${color}/${i}`, {method: 'POST'}).then(res => {
     if (res.ok) {
       mistakes.splice(i, 1);
       renderTable();
@@ -165,7 +168,7 @@ function renderTable() {
     const row = document.createElement('tr');
     row.id = `row-${i}`;
     row.innerHTML = `<td>${i+1}</td>`+
-      `<td>${m.game_count}</td>`+
+      `<td>${m.pair_count}</td>`+
       `<td>${m.avg_cp_loss}</td>`+
       `<td>${m.user_move}</td>`+
       `<td><button class="btn btn-primary btn-sm" onclick="loadMistake(${i})">Show</button> `+

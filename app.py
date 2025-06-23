@@ -11,12 +11,13 @@ from werkzeug.security import generate_password_hash, check_password_hash
 DATABASE_DIR = 'database'
 USERS_FILE = os.path.join(DATABASE_DIR, 'users.json')
 STOCKFISH_PATH = './stockfish'
-ANALYSIS_DEPTH = 10
-OPENING_MOVES_LIMIT = 6
-MAX_GAMES_PER_UPLOAD = 150
+ANALYSIS_DEPTH = 12
+OPENING_MOVES_LIMIT = 8
+MAX_GAMES_PER_UPLOAD = 500
 MAX_FILE_SIZE_MB = 2
-MISTAKE_THRESHOLD_CP = 50
+MISTAKE_THRESHOLD_CP = 70
 TOP_MOVE_THRESHOLD_CP = 30
+MIN_PAIR_OCCURRENCES = 3
 
 app = Flask(__name__, static_folder='assets')
 app.secret_key = os.environ.get('SECRET_KEY', 'secret')
@@ -74,9 +75,34 @@ def clean_and_merge_pgns(files, dest_path):
     return total_games
 
 
-def analyze_pgn(paths):
-    """Analyze one or more PGN files and return a list of common mistakes."""
+def analyze_pgn(paths, color):
+    """Analyze PGN files and return common mistakes for the given color."""
     mistakes = {}
+
+    # First pass: count how many times each (position, move) pair occurs
+    pair_counts = {}
+    for path in paths:
+        if not os.path.exists(path):
+            continue
+        with open(path) as pgn:
+            while True:
+                game = chess.pgn.read_game(pgn)
+                if game is None:
+                    break
+                board = game.board()
+                for i, move in enumerate(game.mainline_moves()):
+                    if i >= OPENING_MOVES_LIMIT:
+                        break
+                    if color == 'white' and board.turn != chess.WHITE:
+                        board.push(move)
+                        continue
+                    if color == 'black' and board.turn != chess.BLACK:
+                        board.push(move)
+                        continue
+                    key = (board.shredder_fen(), move.uci())
+                    pair_counts[key] = pair_counts.get(key, 0) + 1
+                    board.push(move)
+
     engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
     for path in paths:
         if not os.path.exists(path):
@@ -91,6 +117,16 @@ def analyze_pgn(paths):
                     if i >= OPENING_MOVES_LIMIT:
                         break
                     fen = board.fen()
+                    if color == 'white' and board.turn != chess.WHITE:
+                        board.push(move)
+                        continue
+                    if color == 'black' and board.turn != chess.BLACK:
+                        board.push(move)
+                        continue
+                    key = (board.shredder_fen(), move.uci())
+                    if pair_counts.get(key, 0) < MIN_PAIR_OCCURRENCES:
+                        board.push(move)
+                        continue
                     try:
                         infos = engine.analyse(board, chess.engine.Limit(depth=ANALYSIS_DEPTH), multipv=5)
                     except chess.engine.EngineError:
@@ -110,32 +146,33 @@ def analyze_pgn(paths):
                     is_white_turn = board.turn == chess.BLACK
                     cp_loss = score_before - score_after if is_white_turn else score_after - score_before
                     if cp_loss > MISTAKE_THRESHOLD_CP:
-                        key = (fen, move.uci())
                         if key not in mistakes:
                             mistakes[key] = {
                                 'fen': fen,
                                 'user_move': move.uci(),
                                 'top_moves': top_moves,
                                 'game_count': 0,
-                                'total_cp_loss': 0
+                                'total_cp_loss': 0,
+                                'pair_count': pair_counts[key]
                             }
                         mistakes[key]['game_count'] += 1
                         mistakes[key]['total_cp_loss'] += cp_loss
     engine.quit()
     final_list = []
-    for m in mistakes.values():
+    for key, m in mistakes.items():
         if m['game_count'] > 0:
             m['avg_cp_loss'] = round(m['total_cp_loss'] / m['game_count'])
+            m['pair_count'] = pair_counts.get(key, m.get('pair_count', 0))
             final_list.append(m)
-    final_list.sort(key=lambda x: (x['game_count'], x['avg_cp_loss']), reverse=True)
+    final_list.sort(key=lambda x: (x['pair_count'], x['avg_cp_loss']), reverse=True)
     return final_list
 
 
-def analyze_async(paths, analysis_file, flag_file):
+def analyze_async(paths, analysis_file, flag_file, color):
     """Run analyze_pgn in a background thread and remove the flag when done."""
 
     def task():
-        mistakes = analyze_pgn(paths)
+        mistakes = analyze_pgn(paths, color)
         with open(analysis_file, 'w') as f:
             json.dump(mistakes, f)
         if os.path.exists(flag_file):
@@ -217,55 +254,91 @@ def upload():
 def clear_pgns():
     if 'username' not in session:
         return redirect(url_for('login'))
-    for suffix in ['_white.pgn', '_black.pgn', '_analysis.json']:
-        path = os.path.join(user_dir(), f"{session['username']}{suffix}")
+    files = [
+        f"{session['username']}_white.pgn",
+        f"{session['username']}_black.pgn",
+        f"{session['username']}_white_analysis.json",
+        f"{session['username']}_black_analysis.json",
+        'analysis_white.processing',
+        'analysis_black.processing',
+    ]
+    for name in files:
+        path = os.path.join(user_dir(), name)
         if os.path.exists(path):
             os.remove(path)
     return redirect(url_for('upload'))
 
 
-@app.route('/train', methods=['GET', 'POST'])
+@app.route('/train')
 def train():
     if 'username' not in session:
         return redirect(url_for('login'))
-    user_pgn_white = os.path.join(user_dir(), f"{session['username']}_white.pgn")
-    user_pgn_black = os.path.join(user_dir(), f"{session['username']}_black.pgn")
-    analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
-    processing_flag = os.path.join(user_dir(), 'analysis.processing')
-    if request.method == 'POST':
-        paths = []
-        if os.path.exists(user_pgn_white):
-            paths.append(user_pgn_white)
-        if os.path.exists(user_pgn_black):
-            paths.append(user_pgn_black)
-        if paths:
-            open(processing_flag, 'w').close()
-            analyze_async(paths, analysis_file, processing_flag)
-        return redirect(url_for('analysis'))
     return render_template('train.html')
+
+
+def start_analysis(color):
+    pgn_file = os.path.join(user_dir(), f"{session['username']}_{color}.pgn")
+    if not os.path.exists(pgn_file):
+        return False
+    analysis_file = os.path.join(user_dir(), f"{session['username']}_{color}_analysis.json")
+    flag_file = os.path.join(user_dir(), f"analysis_{color}.processing")
+    open(flag_file, 'w').close()
+    analyze_async([pgn_file], analysis_file, flag_file, color)
+    return True
+
+
+@app.route('/train_<color>', methods=['POST'])
+def train_color(color):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    if color == 'both':
+        if os.path.exists(os.path.join(user_dir(), f"{session['username']}_white.pgn")):
+            start_analysis('white')
+        if os.path.exists(os.path.join(user_dir(), f"{session['username']}_black.pgn")):
+            start_analysis('black')
+        return redirect(url_for('analysis'))
+    if start_analysis(color):
+        return redirect(url_for(f'analysis_{color}'))
+    return redirect(url_for('train'))
+
+
+def load_mistakes(color):
+    analysis_file = os.path.join(user_dir(), f"{session['username']}_{color}_analysis.json")
+    flag_file = os.path.join(user_dir(), f"analysis_{color}.processing")
+    if os.path.exists(analysis_file):
+        with open(analysis_file) as f:
+            return json.load(f), False
+    if os.path.exists(flag_file):
+        return [], True
+    return [], False
 
 
 @app.route('/analysis')
 def analysis():
     if 'username' not in session:
         return redirect(url_for('login'))
-    analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
-    processing_flag = os.path.join(user_dir(), 'analysis.processing')
     mistakes = []
     processing = False
-    if os.path.exists(analysis_file):
-        with open(analysis_file) as f:
-            mistakes = json.load(f)
-    elif os.path.exists(processing_flag):
-        processing = True
-    return render_template('analysis.html', mistakes=mistakes, processing=processing)
+    for color in ['white', 'black']:
+        m, p = load_mistakes(color)
+        mistakes.extend(m)
+        processing = processing or p
+    return render_template('analysis.html', mistakes=mistakes, processing=processing, color=None)
 
 
-@app.route('/delete_mistake/<int:index>', methods=['POST'])
-def delete_mistake(index):
+@app.route('/analysis_<color>')
+def analysis_color(color):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    mistakes, processing = load_mistakes(color)
+    return render_template('analysis.html', mistakes=mistakes, processing=processing, color=color)
+
+
+@app.route('/delete_mistake/<color>/<int:index>', methods=['POST'])
+def delete_mistake(color, index):
     if 'username' not in session:
         return ('', 403)
-    analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
+    analysis_file = os.path.join(user_dir(), f"{session['username']}_{color}_analysis.json")
     if not os.path.exists(analysis_file):
         return ('', 404)
     with open(analysis_file) as f:
