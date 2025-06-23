@@ -16,6 +16,9 @@
       <ul class="navbar-nav flex-row">
       {% if session.get('username') %}
         <li class="nav-item me-3 mt-2 text-white">Hello {{ session.username }}</li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('upload') }}">Upload</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('train') }}">Train</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('analysis') }}">Analysis</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('logout') }}">Logout</a></li>
       {% else %}
         <li class="nav-item"><a class="nav-link" href="{{ url_for('login') }}">Login</a></li>

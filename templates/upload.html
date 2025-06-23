@@ -5,20 +5,23 @@
 <div class="border border-2 border-secondary p-4 text-center rounded">
     <form action="/upload" method="post" enctype="multipart/form-data" onsubmit="return validate()">
         <div class="mb-3">
-            <label class="form-label">White games:<br><input type="file" name="white_pgn" class="form-control"></label>
+            <label class="form-label">White games:<br><input type="file" name="white_pgn" class="form-control" multiple></label>
         </div>
         <div class="mb-3">
-            <label class="form-label">Black games:<br><input type="file" name="black_pgn" class="form-control"></label>
+            <label class="form-label">Black games:<br><input type="file" name="black_pgn" class="form-control" multiple></label>
         </div>
         <input type="submit" class="btn btn-primary" value="Upload">
+    </form>
+    <form action="/clear_pgns" method="post" class="mt-3">
+        <button type="submit" class="btn btn-danger">Clear Existing Games</button>
     </form>
     {% if error %}<div class="text-danger mt-2">{{ error }}</div>{% endif %}
 </div>
 <script>
 function validate(){
-    const w = document.querySelector('input[name="white_pgn"]').value;
-    const b = document.querySelector('input[name="black_pgn"]').value;
-    if(!w && !b){
+    const w = document.querySelector('input[name="white_pgn"]').files.length;
+    const b = document.querySelector('input[name="black_pgn"]').files.length;
+    if(w === 0 && b === 0){
         alert('Please select at least one PGN file.');
         return false;
     }
