@@ -4,6 +4,7 @@ import json
 import chess
 import chess.pgn
 import chess.engine
+import threading
 from flask import Flask, render_template, request, redirect, url_for, session
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -119,6 +120,19 @@ def analyze_pgn(paths):
     return final_list
 
 
+def analyze_async(paths, analysis_file, flag_file):
+    """Run analyze_pgn in a background thread and remove the flag when done."""
+
+    def task():
+        mistakes = analyze_pgn(paths)
+        with open(analysis_file, 'w') as f:
+            json.dump(mistakes, f)
+        if os.path.exists(flag_file):
+            os.remove(flag_file)
+
+    threading.Thread(target=task, daemon=True).start()
+
+
 @app.route('/')
 def home():
     if 'username' in session:
@@ -195,6 +209,7 @@ def train():
     user_pgn_white = os.path.join(user_dir(), f"{session['username']}_white.pgn")
     user_pgn_black = os.path.join(user_dir(), f"{session['username']}_black.pgn")
     analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
+    processing_flag = os.path.join(user_dir(), 'analysis.processing')
     if request.method == 'POST':
         paths = []
         if os.path.exists(user_pgn_white):
@@ -202,9 +217,8 @@ def train():
         if os.path.exists(user_pgn_black):
             paths.append(user_pgn_black)
         if paths:
-            mistakes = analyze_pgn(paths)
-            with open(analysis_file, 'w') as f:
-                json.dump(mistakes, f)
+            open(processing_flag, 'w').close()
+            analyze_async(paths, analysis_file, processing_flag)
         return redirect(url_for('analysis'))
     return render_template('train.html')
 
@@ -214,11 +228,15 @@ def analysis():
     if 'username' not in session:
         return redirect(url_for('login'))
     analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
+    processing_flag = os.path.join(user_dir(), 'analysis.processing')
     mistakes = []
+    processing = False
     if os.path.exists(analysis_file):
         with open(analysis_file) as f:
             mistakes = json.load(f)
-    return render_template('analysis.html', mistakes=mistakes)
+    elif os.path.exists(processing_flag):
+        processing = True
+    return render_template('analysis.html', mistakes=mistakes, processing=processing)
 
 
 if __name__ == '__main__':
