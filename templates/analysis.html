@@ -42,7 +42,9 @@
           <td>{{ m.user_move }}</td>
           <td>
             <button class="btn btn-primary btn-sm" onclick="loadMistake({{ loop.index0 }})">Show</button>
+            {% if color %}
             <button class="btn btn-danger btn-sm" onclick="deleteMistake({{ loop.index0 }})">Delete</button>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
