@@ -11,13 +11,13 @@ from werkzeug.security import generate_password_hash, check_password_hash
 DATABASE_DIR = 'database'
 USERS_FILE = os.path.join(DATABASE_DIR, 'users.json')
 STOCKFISH_PATH = './stockfish'
-ANALYSIS_DEPTH = 12
-OPENING_MOVES_LIMIT = 8
-MAX_GAMES_PER_UPLOAD = 500
+ANALYSIS_DEPTH = 14
+OPENING_MOVES_LIMIT = 10
+MAX_GAMES_PER_UPLOAD = 1000
 MAX_FILE_SIZE_MB = 2
-MISTAKE_THRESHOLD_CP = 70
+MISTAKE_THRESHOLD_CP = 50
 TOP_MOVE_THRESHOLD_CP = 30
-MIN_PAIR_OCCURRENCES = 3
+MIN_PAIR_OCCURRENCES = 2
 
 app = Flask(__name__, static_folder='assets')
 app.secret_key = os.environ.get('SECRET_KEY', 'secret')
