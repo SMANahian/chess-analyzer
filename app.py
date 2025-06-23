@@ -185,7 +185,7 @@ def analyze_async(paths, analysis_file, flag_file, color):
 def home():
     if 'username' in session:
         return redirect(url_for('upload'))
-    return redirect(url_for('login'))
+    return render_template('home.html')
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -298,7 +298,7 @@ def train_color(color):
             start_analysis('black')
         return redirect(url_for('analysis'))
     if start_analysis(color):
-        return redirect(url_for(f'analysis_{color}'))
+        return redirect(url_for('analysis_color', color=color))
     return redirect(url_for('train'))
 
 
