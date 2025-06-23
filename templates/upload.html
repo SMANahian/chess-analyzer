@@ -1,7 +1,6 @@
 {% extends 'base.html' %}
 {% block content %}
 <h1>Welcome {{ username }}</h1>
-<p>Use <a href="https://www.openingtree.com/" target="_blank">OpeningTree</a> to create your PGN files and then upload them here.</p>
 <p>Upload <strong>.pgn</strong> files for your games. You may provide one or both files but at least one is required.</p>
 <div class="border border-2 border-secondary p-4 text-center rounded">
     <form action="/upload" method="post" enctype="multipart/form-data" onsubmit="return validate()">
@@ -18,7 +17,6 @@
     </form>
     {% if error %}<div class="text-danger mt-2">{{ error }}</div>{% endif %}
 </div>
-<p class="mt-3 text-muted">This project was created by vibecoding with ChatGPT Codex.</p>
 <script>
 function validate(){
     const w = document.querySelector('input[name="white_pgn"]').files.length;

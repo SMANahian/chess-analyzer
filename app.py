@@ -185,7 +185,7 @@ def analyze_async(paths, analysis_file, flag_file, color):
 def home():
     if 'username' in session:
         return redirect(url_for('upload'))
-    return redirect(url_for('login'))
+    return render_template('home.html')
 
 
 @app.route('/register', methods=['GET', 'POST'])
