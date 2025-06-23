@@ -15,7 +15,7 @@ MAX_FILE_SIZE_MB = 2
 MISTAKE_THRESHOLD_CP = 50
 TOP_MOVE_THRESHOLD_CP = 30
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='assets')
 app.secret_key = os.environ.get('SECRET_KEY', 'secret')
 app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE_MB * 1024 * 1024
 
