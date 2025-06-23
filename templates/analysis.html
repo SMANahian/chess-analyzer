@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Analysis</title>
-    <link rel="stylesheet" href="https://unpkg.com/cm-chessboard/styles/cm-chessboard.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css"/>
     <style>
         body { font-family: sans-serif; max-width: 900px; margin:auto; padding:2em; }
         .board { width: 300px; height: 300px; }
@@ -20,21 +20,17 @@
   <button onclick="prev()">Previous</button>
   <button onclick="next()">Next</button>
 </div>
-<script type="module">
-import { Chessboard } from "https://unpkg.com/cm-chessboard/src/cm-chessboard/Chessboard.js";
+<script src="https://cdn.jsdelivr.net/npm/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+<script>
 const mistakes = {{ mistakes|tojson }};
 let index = 0;
-const board = new Chessboard(document.getElementById("board"), {
-    position: mistakes.length ? mistakes[0].fen : "",
-    style: {
-        aspectRatio: 1,
-        pieces: { file: "https://unpkg.com/cm-chessboard/assets/pieces/staunty.svg" }
-    }
+const board = Chessboard('board', {
+    position: mistakes.length ? mistakes[0].fen : 'start'
 });
 function show(){
     if(!mistakes.length) return;
     const m = mistakes[index];
-    board.setPosition(m.fen);
+    board.position(m.fen);
     document.getElementById("info").innerHTML = `<p>Frequency: ${m.game_count}</p><p>Your move: ${m.user_move}</p>`;
     document.getElementById("moveInput").value = "";
 }
