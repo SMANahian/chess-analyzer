@@ -26,8 +26,9 @@ function show(){
     if(!mistakes.length) return;
     const m = mistakes[index];
     const orientation = m.fen.split(' ')[1] === 'w' ? 'white' : 'black';
+    const fenParam = m.fen.replace(/ /g, '_');
     document.getElementById('board').src =
-        `https://lichess.org/embed/analysis?fen=${encodeURIComponent(m.fen)}&color=${orientation}`;
+        `https://lichess.org/embed/analysis?fen=${fenParam}&color=${orientation}`;
     document.getElementById("info").innerHTML = `<p>Frequency: ${m.game_count}</p><p>Your move: ${m.user_move}</p>`;
     document.getElementById("moveInput").value = "";
 }
