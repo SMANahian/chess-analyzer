@@ -93,7 +93,7 @@ def analyze_pgn(paths):
                 for i, move in enumerate(game.mainline_moves()):
                     if i >= OPENING_MOVES_LIMIT:
                         break
-                    fen = board.fen()
+                    fen = ' '.join(board.fen().split(' ')[:4])
                     key = (fen, move.uci())
                     move_counts[key] = move_counts.get(key, 0) + 1
                     board.push(move)
@@ -113,7 +113,7 @@ def analyze_pgn(paths):
                 for i, move in enumerate(game.mainline_moves()):
                     if i >= OPENING_MOVES_LIMIT:
                         break
-                    fen = board.fen()
+                    fen = ' '.join(board.fen().split(' ')[:4])
                     key = (fen, move.uci())
                     if key not in frequent_keys:
                         board.push(move)
