@@ -17,7 +17,6 @@ MAX_GAMES_PER_UPLOAD = 150
 MAX_FILE_SIZE_MB = 2
 MISTAKE_THRESHOLD_CP = 50
 TOP_MOVE_THRESHOLD_CP = 30
-MIN_MOVE_OCCURRENCES = 3
 
 app = Flask(__name__, static_folder='assets')
 app.secret_key = os.environ.get('SECRET_KEY', 'secret')
@@ -78,29 +77,6 @@ def clean_and_merge_pgns(files, dest_path):
 def analyze_pgn(paths):
     """Analyze one or more PGN files and return a list of common mistakes."""
     mistakes = {}
-
-    # First pass: count how many times each move was played in a position
-    move_counts = {}
-    for path in paths:
-        if not os.path.exists(path):
-            continue
-        with open(path) as pgn:
-            while True:
-                game = chess.pgn.read_game(pgn)
-                if game is None:
-                    break
-                board = game.board()
-                for i, move in enumerate(game.mainline_moves()):
-                    if i >= OPENING_MOVES_LIMIT:
-                        break
-                    full_fen = board.fen()
-                    fen_key = ' '.join(full_fen.split(' ')[:4])
-                    key = (fen_key, move.uci())
-                    move_counts[key] = move_counts.get(key, 0) + 1
-                    board.push(move)
-
-    frequent_keys = {k for k, c in move_counts.items() if c >= MIN_MOVE_OCCURRENCES}
-
     engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
     for path in paths:
         if not os.path.exists(path):
@@ -114,12 +90,7 @@ def analyze_pgn(paths):
                 for i, move in enumerate(game.mainline_moves()):
                     if i >= OPENING_MOVES_LIMIT:
                         break
-                    full_fen = board.fen()
-                    fen_key = ' '.join(full_fen.split(' ')[:4])
-                    key = (fen_key, move.uci())
-                    if key not in frequent_keys:
-                        board.push(move)
-                        continue
+                    fen = board.fen()
                     try:
                         infos = engine.analyse(board, chess.engine.Limit(depth=ANALYSIS_DEPTH), multipv=5)
                     except chess.engine.EngineError:
@@ -139,9 +110,10 @@ def analyze_pgn(paths):
                     is_white_turn = board.turn == chess.BLACK
                     cp_loss = score_before - score_after if is_white_turn else score_after - score_before
                     if cp_loss > MISTAKE_THRESHOLD_CP:
+                        key = (fen, move.uci())
                         if key not in mistakes:
                             mistakes[key] = {
-                                'fen': full_fen,
+                                'fen': fen,
                                 'user_move': move.uci(),
                                 'top_moves': top_moves,
                                 'game_count': 0,
@@ -149,8 +121,6 @@ def analyze_pgn(paths):
                             }
                         mistakes[key]['game_count'] += 1
                         mistakes[key]['total_cp_loss'] += cp_loss
-                # end for moves
-            # end while games
     engine.quit()
     final_list = []
     for m in mistakes.values():
@@ -263,8 +233,6 @@ def train():
     analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
     processing_flag = os.path.join(user_dir(), 'analysis.processing')
     if request.method == 'POST':
-        if os.path.exists(processing_flag):
-            return redirect(url_for('analysis'))
         paths = []
         if os.path.exists(user_pgn_white):
             paths.append(user_pgn_white)
@@ -274,8 +242,7 @@ def train():
             open(processing_flag, 'w').close()
             analyze_async(paths, analysis_file, processing_flag)
         return redirect(url_for('analysis'))
-    processing = os.path.exists(processing_flag)
-    return render_template('train.html', processing=processing)
+    return render_template('train.html')
 
 
 @app.route('/analysis')
