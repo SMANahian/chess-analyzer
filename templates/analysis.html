@@ -1,23 +1,15 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Analysis</title>
-    <style>
-        body { font-family: sans-serif; max-width: 900px; margin:auto; padding:2em; }
-        #board { width: 100%; aspect-ratio: 4/3; }
-        #controls { margin-top: 1em; }
-    </style>
-</head>
-<body>
+{% extends 'base.html' %}
+{% block content %}
 <h1>Training Board</h1>
-<iframe id="board" frameborder="0"></iframe>
-<div id="info"></div>
-<input id="moveInput" placeholder="e2e4">
-<button onclick="checkMove()">Check Move</button>
-<div id="controls">
-  <button onclick="prev()">Previous</button>
-  <button onclick="next()">Next</button>
+<iframe id="board" frameborder="0" style="width:100%; aspect-ratio:4/3;"></iframe>
+<div id="info" class="my-2"></div>
+<div class="input-group mb-3" style="max-width:200px;">
+  <input id="moveInput" class="form-control" placeholder="e2e4">
+  <button class="btn btn-outline-secondary" onclick="checkMove()">Check Move</button>
+</div>
+<div id="controls" class="mb-3">
+  <button class="btn btn-secondary" onclick="prev()">Previous</button>
+  <button class="btn btn-secondary" onclick="next()">Next</button>
 </div>
 <script>
 const mistakes = {{ mistakes|tojson }};
@@ -43,5 +35,4 @@ function prev(){ if(index>0){ index--; show(); } }
 function next(){ if(index < mistakes.length-1){ index++; show(); } }
 show();
 </script>
-</body>
-</html>
+{% endblock %}

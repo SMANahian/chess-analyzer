@@ -1,37 +1,28 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Upload PGN File</title>
-    <style>
-        body { font-family: sans-serif; max-width: 800px; margin: auto; padding: 2em; }
-        .container { border: 2px dashed #ccc; padding: 2em; text-align: center; }
-        input[type="submit"] { margin-top: 1em; padding: 0.5em 1em; }
-    </style>
-</head>
-<body>
-    <h1>Welcome {{ username }}</h1>
-    <p>Upload <strong>.pgn</strong> files for your games. You may provide one or both files but at least one is required.</p>
-    <div class="container">
-        <form action="/upload" method="post" enctype="multipart/form-data" onsubmit="return validate()">
-            <label>White games:<br><input type="file" name="white_pgn"></label>
-            <br>
-            <label>Black games:<br><input type="file" name="black_pgn"></label>
-            <br>
-            <input type="submit" value="Upload">
-        </form>
-        {% if error %}<p style="color:red;">{{ error }}</p>{% endif %}
-    </div>
-    <script>
-    function validate(){
-        const w = document.querySelector('input[name="white_pgn"]').value;
-        const b = document.querySelector('input[name="black_pgn"]').value;
-        if(!w && !b){
-            alert('Please select at least one PGN file.');
-            return false;
-        }
-        return true;
+{% extends 'base.html' %}
+{% block content %}
+<h1>Welcome {{ username }}</h1>
+<p>Upload <strong>.pgn</strong> files for your games. You may provide one or both files but at least one is required.</p>
+<div class="border border-2 border-secondary p-4 text-center rounded">
+    <form action="/upload" method="post" enctype="multipart/form-data" onsubmit="return validate()">
+        <div class="mb-3">
+            <label class="form-label">White games:<br><input type="file" name="white_pgn" class="form-control"></label>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Black games:<br><input type="file" name="black_pgn" class="form-control"></label>
+        </div>
+        <input type="submit" class="btn btn-primary" value="Upload">
+    </form>
+    {% if error %}<div class="text-danger mt-2">{{ error }}</div>{% endif %}
+</div>
+<script>
+function validate(){
+    const w = document.querySelector('input[name="white_pgn"]').value;
+    const b = document.querySelector('input[name="black_pgn"]').value;
+    if(!w && !b){
+        alert('Please select at least one PGN file.');
+        return false;
     }
-    </script>
-</body>
-</html>
+    return true;
+}
+</script>
+{% endblock %}

@@ -5,8 +5,10 @@ import chess
 import chess.pgn
 import chess.engine
 from flask import Flask, render_template, request, redirect, url_for, session
+from werkzeug.security import generate_password_hash, check_password_hash
 
 DATABASE_DIR = 'database'
+USERS_FILE = os.path.join(DATABASE_DIR, 'users.json')
 STOCKFISH_PATH = './stockfish'
 ANALYSIS_DEPTH = 10
 OPENING_MOVES_LIMIT = 6
@@ -22,6 +24,19 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE_MB * 1024 * 1024
 
 def user_dir():
     return os.path.join(DATABASE_DIR, session['username'])
+
+
+def load_users():
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE) as f:
+            return json.load(f)
+    return {}
+
+
+def save_users(users):
+    os.makedirs(DATABASE_DIR, exist_ok=True)
+    with open(USERS_FILE, 'w') as f:
+        json.dump(users, f)
 
 
 def clean_and_merge_pgn(file_storage, dest_path):
@@ -111,14 +126,47 @@ def home():
     return redirect(url_for('login'))
 
 
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form['username']
+        email = request.form['email']
+        password = request.form['password']
+        users = load_users()
+        if username in users:
+            return render_template('register.html', error='Username already exists')
+        users[username] = {
+            'email': email,
+            'password': generate_password_hash(password)
+        }
+        save_users(users)
+        session['username'] = username
+        session['email'] = email
+        os.makedirs(user_dir(), exist_ok=True)
+        return redirect(url_for('upload'))
+    return render_template('register.html')
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        session['username'] = request.form['username']
-        session['email'] = request.form['email']
-        os.makedirs(user_dir(), exist_ok=True)
-        return redirect(url_for('upload'))
+        username = request.form['username']
+        password = request.form['password']
+        users = load_users()
+        user = users.get(username)
+        if user and check_password_hash(user['password'], password):
+            session['username'] = username
+            session['email'] = user['email']
+            os.makedirs(user_dir(), exist_ok=True)
+            return redirect(url_for('upload'))
+        return render_template('login.html', error='Invalid credentials')
     return render_template('login.html')
+
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
 
 
 @app.route('/upload', methods=['GET', 'POST'])
