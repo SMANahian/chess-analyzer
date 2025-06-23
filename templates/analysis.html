@@ -3,16 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <title>Analysis</title>
-    <link rel="stylesheet" href="assets/css/chessboard.css"/>
     <style>
         body { font-family: sans-serif; max-width: 900px; margin:auto; padding:2em; }
-        .board { width: 300px; height: 300px; }
+        #board { width: 100%; aspect-ratio: 4/3; }
         #controls { margin-top: 1em; }
     </style>
 </head>
 <body>
 <h1>Training Board</h1>
-<div id="board" class="board"></div>
+<iframe id="board" frameborder="0"></iframe>
 <div id="info"></div>
 <input id="moveInput" placeholder="e2e4">
 <button onclick="checkMove()">Check Move</button>
@@ -20,19 +19,15 @@
   <button onclick="prev()">Previous</button>
   <button onclick="next()">Next</button>
 </div>
-<script src="assets/js/jquery-3.6.0.min.js"></script>
-<script src="assets/js/chessboard.js"></script>
 <script>
 const mistakes = {{ mistakes|tojson }};
 let index = 0;
-const board = Chessboard('board', {
-    position: mistakes.length ? mistakes[0].fen : 'start',
-    pieceTheme: 'img/chesspieces/wikipedia/{piece}.png'
-});
 function show(){
     if(!mistakes.length) return;
     const m = mistakes[index];
-    board.position(m.fen);
+    const orientation = m.fen.split(' ')[1] === 'w' ? 'white' : 'black';
+    document.getElementById('board').src =
+        `https://lichess.org/embed/analysis?fen=${encodeURIComponent(m.fen)}&color=${orientation}`;
     document.getElementById("info").innerHTML = `<p>Frequency: ${m.game_count}</p><p>Your move: ${m.user_move}</p>`;
     document.getElementById("moveInput").value = "";
 }
