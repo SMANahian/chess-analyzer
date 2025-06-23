@@ -17,6 +17,7 @@ MAX_GAMES_PER_UPLOAD = 150
 MAX_FILE_SIZE_MB = 2
 MISTAKE_THRESHOLD_CP = 50
 TOP_MOVE_THRESHOLD_CP = 30
+MIN_PAIR_OCCURRENCES = 3
 
 app = Flask(__name__, static_folder='assets')
 app.secret_key = os.environ.get('SECRET_KEY', 'secret')
@@ -77,6 +78,25 @@ def clean_and_merge_pgns(files, dest_path):
 def analyze_pgn(paths):
     """Analyze one or more PGN files and return a list of common mistakes."""
     mistakes = {}
+
+    # First pass: count how many times each (position, move) pair occurs
+    pair_counts = {}
+    for path in paths:
+        if not os.path.exists(path):
+            continue
+        with open(path) as pgn:
+            while True:
+                game = chess.pgn.read_game(pgn)
+                if game is None:
+                    break
+                board = game.board()
+                for i, move in enumerate(game.mainline_moves()):
+                    if i >= OPENING_MOVES_LIMIT:
+                        break
+                    key = (board.fen(), move.uci())
+                    pair_counts[key] = pair_counts.get(key, 0) + 1
+                    board.push(move)
+
     engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
     for path in paths:
         if not os.path.exists(path):
@@ -91,6 +111,10 @@ def analyze_pgn(paths):
                     if i >= OPENING_MOVES_LIMIT:
                         break
                     fen = board.fen()
+                    key = (fen, move.uci())
+                    if pair_counts.get(key, 0) < MIN_PAIR_OCCURRENCES:
+                        board.push(move)
+                        continue
                     try:
                         infos = engine.analyse(board, chess.engine.Limit(depth=ANALYSIS_DEPTH), multipv=5)
                     except chess.engine.EngineError:
@@ -110,7 +134,6 @@ def analyze_pgn(paths):
                     is_white_turn = board.turn == chess.BLACK
                     cp_loss = score_before - score_after if is_white_turn else score_after - score_before
                     if cp_loss > MISTAKE_THRESHOLD_CP:
-                        key = (fen, move.uci())
                         if key not in mistakes:
                             mistakes[key] = {
                                 'fen': fen,
