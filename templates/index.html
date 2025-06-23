@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Upload PGN File</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: auto; padding: 2em; }
+        .container { border: 2px dashed #ccc; padding: 2em; text-align: center; }
+        input[type="submit"] { margin-top: 1em; padding: 0.5em 1em; }
+    </style>
+</head>
+<body>
+    <h1>Analyze Your Openings</h1>
+    <p>Upload a <strong>.pgn</strong> file containing your games.</p>
+    <div class="container">
+        <form action="/analyze" method="post" enctype="multipart/form-data">
+            <input type="file" name="pgn_file" required>
+            <br>
+            <input type="submit" value="Analyze My Mistakes">
+        </form>
+    </div>
+</body>
+</html>

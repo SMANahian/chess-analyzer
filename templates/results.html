@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Analysis Results</title>
+    <link rel="stylesheet" href="https://unpkg.com/cm-chessboard/styles/cm-chessboard.css"/>
+    <style>
+        body { font-family: sans-serif; max-width: 900px; margin: auto; padding: 2em; }
+        table { width: 100%; border-collapse: collapse; margin-top: 2em; }
+        th, td { border: 1px solid #ccc; padding: 0.8em; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .board-container { width: 250px; height: 250px; margin-top: 1em; }
+    </style>
+</head>
+<body>
+    <h1>Your Recurring Opening Mistakes</h1>
+    <p>Showing mistakes made more than once, sorted by frequency and severity.</p>
+    <a href="/">&larr; Analyze another file</a>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Position</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for mistake in mistakes %}
+            <tr>
+                <td>
+                    <div id="board-{{ loop.index }}" class="board-container"></div>
+                </td>
+                <td>
+                    <p><strong>Times Repeated:</strong> <strong style="color: blue;">{{ mistake.game_count }}</strong></p>
+                    <p><strong>Your Move:</strong> <code>{{ mistake.user_move }}</code></p>
+                    <p><strong>Engine's Best Move:</strong> <code>{{ mistake.best_move }}</code></p>
+                    <p><strong>Average Centipawn Loss:</strong> <strong style="color: red;">{{ mistake.avg_cp_loss }}</strong></p>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="2">No significant recurring mistakes found with the current settings! Try lowering the centipawn threshold or checking your PGN file.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <script type="module">
+        import { Chessboard } from "https://unpkg.com/cm-chessboard/src/cm-chessboard/Chessboard.js"
+        
+        // Use a try-catch block in case the mistakes object is empty
+        try {
+            const mistakes = {{ mistakes|tojson }};
+            
+            mistakes.forEach((mistake, index) => {
+                const boardId = `board-${index + 1}`;
+                new Chessboard(document.getElementById(boardId), {
+                    position: mistake.fen,
+                    style: {
+                        aspectRatio: 1,
+                        pieces: {
+                            file: "https://unpkg.com/cm-chessboard/assets/pieces/staunty.svg"
+                        }
+                    }
+                });
+            });
+        } catch (e) {
+            console.error("Could not initialize chessboards:", e);
+        }
+    </script>
+</body>
+</html>
