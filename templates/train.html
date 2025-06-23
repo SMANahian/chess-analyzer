@@ -1,7 +1,18 @@
 {% extends 'base.html' %}
 {% block content %}
 <h1>Training</h1>
-<form method="post" class="mt-3">
+<form method="post" class="mt-3" onsubmit="return checkPending()">
     <button type="submit" class="btn btn-primary">Analyze</button>
 </form>
+
+<script>
+const analysisPending = {{ 'true' if processing else 'false' }};
+function checkPending() {
+    if (analysisPending) {
+        alert('Analysis already in progress. Please wait.');
+        return false;
+    }
+    return true;
+}
+</script>
 {% endblock %}
