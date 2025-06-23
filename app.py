@@ -8,9 +8,9 @@ from flask import Flask, render_template, request, redirect, url_for, session
 
 DATABASE_DIR = 'database'
 STOCKFISH_PATH = './stockfish'
-ANALYSIS_DEPTH = 14
-OPENING_MOVES_LIMIT = 30
-MAX_GAMES_PER_UPLOAD = 50
+ANALYSIS_DEPTH = 10
+OPENING_MOVES_LIMIT = 6
+MAX_GAMES_PER_UPLOAD = 150
 MAX_FILE_SIZE_MB = 2
 MISTAKE_THRESHOLD_CP = 50
 TOP_MOVE_THRESHOLD_CP = 30
