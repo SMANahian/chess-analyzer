@@ -10,13 +10,13 @@
     </style>
 </head>
 <body>
-    <h1>Analyze Your Openings</h1>
+    <h1>Welcome {{ username }}</h1>
     <p>Upload a <strong>.pgn</strong> file containing your games.</p>
     <div class="container">
-        <form action="/analyze" method="post" enctype="multipart/form-data">
+        <form action="/upload" method="post" enctype="multipart/form-data">
             <input type="file" name="pgn_file" required>
             <br>
-            <input type="submit" value="Analyze My Mistakes">
+            <input type="submit" value="Upload">
         </form>
     </div>
 </body>

@@ -1,107 +1,162 @@
 import os
+import io
+import json
 import chess
 import chess.pgn
 import chess.engine
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, session
 
-# --- Configuration ---
-UPLOAD_FOLDER = 'uploads'
-STOCKFISH_PATH = './stockfish' # Make sure this path is correct
-ANALYSIS_DEPTH = 14 # Engine depth. Higher is stronger but slower.
-OPENING_MOVES_LIMIT = 4 # Analyze the first 20 moves of each game
-MISTAKE_THRESHOLD_CP = 50 # Minimum centipawn loss to be considered a mistake
+DATABASE_DIR = 'database'
+STOCKFISH_PATH = './stockfish'
+ANALYSIS_DEPTH = 14
+OPENING_MOVES_LIMIT = 30
+MAX_GAMES_PER_UPLOAD = 50
+MAX_FILE_SIZE_MB = 2
+MISTAKE_THRESHOLD_CP = 50
+TOP_MOVE_THRESHOLD_CP = 30
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.secret_key = os.environ.get('SECRET_KEY', 'secret')
+app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE_MB * 1024 * 1024
 
-# --- Flask Routes ---
-@app.route('/')
-def index():
-    return render_template('index.html')
 
-@app.route('/analyze', methods=['POST'])
-def analyze():
-    if 'pgn_file' not in request.files:
-        return redirect(url_for('index'))
+def user_dir():
+    return os.path.join(DATABASE_DIR, session['username'])
 
-    file = request.files['pgn_file']
-    if file.filename == '' or not file.filename.lower().endswith('.pgn'):
-        return redirect(url_for('index'))
 
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-    file.save(filepath)
+def clean_and_merge_pgn(file_storage, dest_path):
+    data = file_storage.read().decode('utf-8', 'ignore')
+    pgn_io = io.StringIO(data)
+    games = []
+    for _ in range(MAX_GAMES_PER_UPLOAD):
+        game = chess.pgn.read_game(pgn_io)
+        if game is None:
+            break
+        board = game.board()
+        new_game = chess.pgn.Game()
+        node = new_game
+        for i, move in enumerate(game.mainline_moves()):
+            if i >= OPENING_MOVES_LIMIT:
+                break
+            node = node.add_variation(move)
+            board.push(move)
+        exporter = chess.pgn.StringExporter(headers=True, variations=False, comments=False)
+        games.append(new_game.accept(exporter))
+    with open(dest_path, 'a') as f:
+        for g in games:
+            f.write(g + '\n\n')
 
-    # --- Start Analysis ---
-    mistakes_aggregator = {} # Key: (FEN, user_move), Value: {details}
+
+def analyze_pgn(path):
+    mistakes = {}
     engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
-    
-    with open(filepath) as pgn:
+    with open(path) as pgn:
         while True:
-            try:
-                game = chess.pgn.read_game(pgn)
-            except (ValueError, KeyError):
-                # Handle potential parsing errors in malformed PGNs
-                continue
-                
+            game = chess.pgn.read_game(pgn)
             if game is None:
-                break # End of PGN file
-
+                break
             board = game.board()
             for i, move in enumerate(game.mainline_moves()):
                 if i >= OPENING_MOVES_LIMIT:
                     break
-
-                position_fen = board.fen()
-                
+                fen = board.fen()
                 try:
-                    # Get evaluation and best move *before* the user's move
-                    info_before = engine.analyse(board, chess.engine.Limit(depth=ANALYSIS_DEPTH))
-                    score_before = info_before["score"].white().score(mate_score=10000)
-                    best_move = info_before['pv'][0]
-                except (chess.engine.EngineError, IndexError):
+                    infos = engine.analyse(board, chess.engine.Limit(depth=ANALYSIS_DEPTH), multipv=5)
+                except chess.engine.EngineError:
                     board.push(move)
-                    continue # Skip this move if engine fails
-
-                # Make the user's move and get the new evaluation
+                    continue
+                best_score = infos[0]['score'].white().score(mate_score=10000)
+                top_moves = []
+                for info in infos:
+                    mv = info['pv'][0]
+                    mv_score = info['score'].white().score(mate_score=10000)
+                    if best_score - mv_score <= TOP_MOVE_THRESHOLD_CP:
+                        top_moves.append(mv.uci())
+                score_before = best_score
                 board.push(move)
                 info_after = engine.analyse(board, chess.engine.Limit(depth=ANALYSIS_DEPTH))
-                score_after = info_after["score"].white().score(mate_score=10000)
-
-                # Calculate centipawn loss from the correct perspective
-                is_white_turn = (board.turn == chess.BLACK) # Turn has already switched
+                score_after = info_after['score'].white().score(mate_score=10000)
+                is_white_turn = board.turn == chess.BLACK
                 cp_loss = score_before - score_after if is_white_turn else score_after - score_before
-
                 if cp_loss > MISTAKE_THRESHOLD_CP:
-                    mistake_key = (position_fen, move.uci())
-                    
-                    if mistake_key not in mistakes_aggregator:
-                        mistakes_aggregator[mistake_key] = {
-                            'fen': position_fen,
+                    key = (fen, move.uci())
+                    if key not in mistakes:
+                        mistakes[key] = {
+                            'fen': fen,
                             'user_move': move.uci(),
-                            'best_move': best_move.uci(),
+                            'top_moves': top_moves,
                             'game_count': 0,
                             'total_cp_loss': 0
                         }
-                    
-                    mistakes_aggregator[mistake_key]['game_count'] += 1
-                    mistakes_aggregator[mistake_key]['total_cp_loss'] += cp_loss
-
+                    mistakes[key]['game_count'] += 1
+                    mistakes[key]['total_cp_loss'] += cp_loss
     engine.quit()
-    # --- End Analysis ---
+    final_list = []
+    for m in mistakes.values():
+        if m['game_count'] > 0:
+            m['avg_cp_loss'] = round(m['total_cp_loss'] / m['game_count'])
+            final_list.append(m)
+    final_list.sort(key=lambda x: (x['game_count'], x['avg_cp_loss']), reverse=True)
+    return final_list
 
-    # Convert the aggregated dictionary into a list for rendering
-    final_mistakes_list = []
-    for mistake in mistakes_aggregator.values():
-        # Only show mistakes that were made more than once
-        if mistake['game_count'] > 1:
-            mistake['avg_cp_loss'] = round(mistake['total_cp_loss'] / mistake['game_count'])
-            final_mistakes_list.append(mistake)
-    
-    # Sort by how often the mistake was made, then by average severity
-    final_mistakes_list.sort(key=lambda x: (x['game_count'], x['avg_cp_loss']), reverse=True)
 
-    return render_template('results.html', mistakes=final_mistakes_list)
+@app.route('/')
+def home():
+    if 'username' in session:
+        return redirect(url_for('upload'))
+    return redirect(url_for('login'))
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        session['username'] = request.form['username']
+        session['email'] = request.form['email']
+        os.makedirs(user_dir(), exist_ok=True)
+        return redirect(url_for('upload'))
+    return render_template('login.html')
+
+
+@app.route('/upload', methods=['GET', 'POST'])
+def upload():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    if request.method == 'POST':
+        file = request.files.get('pgn_file')
+        if file and file.filename.lower().endswith('.pgn'):
+            dest = os.path.join(user_dir(), f"{session['username']}.pgn")
+            clean_and_merge_pgn(file, dest)
+            return redirect(url_for('train'))
+    return render_template('upload.html', username=session.get('username'))
+
+
+@app.route('/train', methods=['GET', 'POST'])
+def train():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    user_pgn = os.path.join(user_dir(), f"{session['username']}.pgn")
+    analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
+    if request.method == 'POST':
+        if os.path.exists(user_pgn):
+            mistakes = analyze_pgn(user_pgn)
+            with open(analysis_file, 'w') as f:
+                json.dump(mistakes, f)
+        return redirect(url_for('analysis'))
+    return render_template('train.html')
+
+
+@app.route('/analysis')
+def analysis():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
+    mistakes = []
+    if os.path.exists(analysis_file):
+        with open(analysis_file) as f:
+            mistakes = json.load(f)
+    return render_template('analysis.html', mistakes=mistakes)
+
 
 if __name__ == '__main__':
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    os.makedirs(DATABASE_DIR, exist_ok=True)
     app.run(debug=True)
