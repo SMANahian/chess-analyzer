@@ -2,6 +2,7 @@
 {% block content %}
 <h1>Welcome {{ username }}</h1>
 <p>Upload <strong>.pgn</strong> files for your games. You may provide one or both files but at least one is required.</p>
+<p class="mb-3">Use <a href="https://www.openingtree.com/" target="_blank">OpeningTree</a> to create your PGN files and then upload them here.</p>
 <div class="border border-2 border-secondary p-4 text-center rounded">
     <form action="/upload" method="post" enctype="multipart/form-data" onsubmit="return validate()">
         <div class="mb-3">
