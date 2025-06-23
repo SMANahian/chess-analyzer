@@ -6,12 +6,13 @@
 <p>No analysis available. Run training first.</p>
 {% else %}
 <h1>Training Board</h1>
-<iframe id="board" frameborder="0" style="width:100%; aspect-ratio:4/3;"></iframe>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/chessboard.css') }}">
+<script src="{{ url_for('static', filename='js/jquery-3.6.0.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chess.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chessboard.js') }}"></script>
+
+<div id="board" style="width:400px;"></div>
 <div id="info" class="my-2"></div>
-<div class="input-group mb-3" style="max-width:200px;">
-  <input id="moveInput" class="form-control" placeholder="e2e4">
-  <button class="btn btn-outline-secondary" onclick="checkMove()">Check Move</button>
-</div>
 <div id="controls" class="mb-3">
   <button class="btn btn-secondary" onclick="prev()">Previous</button>
   <button class="btn btn-secondary" onclick="next()">Next</button>
@@ -19,26 +20,76 @@
 <script>
 const mistakes = {{ mistakes|tojson }};
 let index = 0;
-function show(){
-    if(!mistakes.length) return;
-    const m = mistakes[index];
-    const orientation = m.fen.split(' ')[1] === 'w' ? 'white' : 'black';
-    const fenParam = m.fen.replace(/ /g, '_');
-    document.getElementById('board').src =
-        `https://lichess.org/embed/analysis?fen=${fenParam}&color=${orientation}`;
-    document.getElementById("info").innerHTML = `<p>Frequency: ${m.game_count}</p><p>Your move: ${m.user_move}</p>`;
-    document.getElementById("moveInput").value = "";
+let board = null;
+let game = null;
+
+function removeGreySquares() {
+  $('#board .square-55d63').css('background', '');
 }
-function checkMove(){
-    const move = document.getElementById("moveInput").value.trim();
-    if(!move) return;
-    const m = mistakes[index];
-    if(m.top_moves.includes(move)) alert("Good move!");
-    else alert("Not a top move");
+
+function greySquare(square) {
+  const $square = $('#board .square-' + square);
+  let background = '#a9a9a9';
+  if ($square.hasClass('black-3c85d')) background = '#696969';
+  $square.css('background', background);
 }
-function prev(){ if(index>0){ index--; show(); } }
-function next(){ if(index < mistakes.length-1){ index++; show(); } }
-show();
+
+function onDragStart(source, piece) {
+  if (game.game_over()) return false;
+  if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+      (game.turn() === 'b' && piece.search(/^w/) !== -1)) return false;
+}
+
+function onDrop(source, target) {
+  removeGreySquares();
+  const move = game.move({from: source, to: target, promotion: 'q'});
+  if (move === null) return 'snapback';
+  board.position(game.fen());
+  const m = mistakes[index];
+  const uci = move.from + move.to + (move.promotion ? move.promotion : '');
+  if (m.top_moves.includes(uci)) alert('Good move!');
+  else alert('Not a top move');
+}
+
+function onMouseoverSquare(square, piece) {
+  const moves = game.moves({square: square, verbose: true});
+  if (moves.length === 0) return;
+  greySquare(square);
+  for (let i = 0; i < moves.length; i++) {
+    greySquare(moves[i].to);
+  }
+}
+
+function onMouseoutSquare(square, piece) {
+  removeGreySquares();
+}
+
+function show() {
+  if (!mistakes.length) return;
+  const m = mistakes[index];
+  game = new Chess(m.fen);
+  const orientation = game.turn() === 'w' ? 'white' : 'black';
+  board.orientation(orientation);
+  board.position(m.fen, false);
+  document.getElementById('info').innerHTML =
+    `<p>Frequency: ${m.game_count}</p><p>Your move: ${m.user_move}</p>`;
+}
+
+function prev() { if (index > 0) { index--; show(); } }
+function next() { if (index < mistakes.length - 1) { index++; show(); } }
+
+$(function() {
+  const config = {
+    draggable: true,
+    pieceTheme: '/assets/img/chesspieces/wikipedia/{piece}.png',
+    onDragStart: onDragStart,
+    onDrop: onDrop,
+    onMouseoutSquare: onMouseoutSquare,
+    onMouseoverSquare: onMouseoverSquare
+  };
+  board = Chessboard('board', config);
+  show();
+});
 </script>
 {% endif %}
 {% endblock %}
