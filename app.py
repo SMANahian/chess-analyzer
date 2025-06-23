@@ -261,6 +261,8 @@ def train():
     analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
     processing_flag = os.path.join(user_dir(), 'analysis.processing')
     if request.method == 'POST':
+        if os.path.exists(processing_flag):
+            return redirect(url_for('analysis'))
         paths = []
         if os.path.exists(user_pgn_white):
             paths.append(user_pgn_white)
@@ -270,7 +272,8 @@ def train():
             open(processing_flag, 'w').close()
             analyze_async(paths, analysis_file, processing_flag)
         return redirect(url_for('analysis'))
-    return render_template('train.html')
+    processing = os.path.exists(processing_flag)
+    return render_template('train.html', processing=processing)
 
 
 @app.route('/analysis')
