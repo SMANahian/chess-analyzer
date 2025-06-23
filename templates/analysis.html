@@ -13,10 +13,11 @@
 
 <div id="board" style="width:400px;"></div>
 <div id="info" class="my-2"></div>
-<div id="controls" class="mb-3">
-  <button class="btn btn-secondary" onclick="prev()">Previous</button>
-  <button class="btn btn-secondary" onclick="next()">Next</button>
-</div>
+  <div id="controls" class="mb-3">
+    <button class="btn btn-secondary" onclick="prev()">Previous</button>
+    <button class="btn btn-secondary" onclick="next()">Next</button>
+    <button class="btn btn-danger" onclick="giveUp()">Give Up</button>
+  </div>
 <script>
 const mistakes = {{ mistakes|tojson }};
 let index = 0;
@@ -47,8 +48,13 @@ function onDrop(source, target) {
   board.position(game.fen());
   const m = mistakes[index];
   const uci = move.from + move.to + (move.promotion ? move.promotion : '');
-  if (m.top_moves.includes(uci)) alert('Good move!');
-  else alert('Not a top move');
+  if (m.top_moves.includes(uci)) {
+    alert('Good move!');
+  } else {
+    alert('Not a top move. Try again.');
+    game.undo();
+    board.position(game.fen());
+  }
 }
 
 function onMouseoverSquare(square, piece) {
@@ -78,10 +84,21 @@ function show() {
 function prev() { if (index > 0) { index--; show(); } }
 function next() { if (index < mistakes.length - 1) { index++; show(); } }
 
+function giveUp() {
+  const m = mistakes[index];
+  if (!m.top_moves.length) return;
+  const best = m.top_moves[0];
+  const moveObj = {from: best.slice(0,2), to: best.slice(2,4)};
+  if (best.length > 4) moveObj.promotion = best.slice(4);
+  game.move(moveObj);
+  board.position(game.fen());
+  alert('Best move: ' + best);
+}
+
 $(function() {
   const config = {
     draggable: true,
-    pieceTheme: '/static/img/chesspieces/wikipedia/{piece}.png',
+    pieceTheme: '/assets/img/chesspieces/wikipedia/{piece}.png',
     onDragStart: onDragStart,
     onDrop: onDrop,
     onMouseoutSquare: onMouseoutSquare,
