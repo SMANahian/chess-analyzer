@@ -239,6 +239,22 @@ def analysis():
     return render_template('analysis.html', mistakes=mistakes, processing=processing)
 
 
+@app.route('/delete_mistake/<int:index>', methods=['POST'])
+def delete_mistake(index):
+    if 'username' not in session:
+        return ('', 403)
+    analysis_file = os.path.join(user_dir(), f"{session['username']}_analysis.json")
+    if not os.path.exists(analysis_file):
+        return ('', 404)
+    with open(analysis_file) as f:
+        mistakes = json.load(f)
+    if 0 <= index < len(mistakes):
+        mistakes.pop(index)
+        with open(analysis_file, 'w') as f:
+            json.dump(mistakes, f)
+    return ('', 204)
+
+
 if __name__ == '__main__':
     os.makedirs(DATABASE_DIR, exist_ok=True)
     app.run(debug=True)
