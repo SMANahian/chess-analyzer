@@ -152,17 +152,19 @@ def analyze_pgn(paths, color):
                                 'user_move': move.uci(),
                                 'top_moves': top_moves,
                                 'game_count': 0,
-                                'total_cp_loss': 0
+                                'total_cp_loss': 0,
+                                'pair_count': pair_counts[key]
                             }
                         mistakes[key]['game_count'] += 1
                         mistakes[key]['total_cp_loss'] += cp_loss
     engine.quit()
     final_list = []
-    for m in mistakes.values():
+    for key, m in mistakes.items():
         if m['game_count'] > 0:
             m['avg_cp_loss'] = round(m['total_cp_loss'] / m['game_count'])
+            m['pair_count'] = pair_counts.get(key, m.get('pair_count', 0))
             final_list.append(m)
-    final_list.sort(key=lambda x: (x['game_count'], x['avg_cp_loss']), reverse=True)
+    final_list.sort(key=lambda x: (x['pair_count'], x['avg_cp_loss']), reverse=True)
     return final_list
 
 

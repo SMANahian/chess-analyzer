@@ -37,7 +37,7 @@
         {% for m in mistakes %}
         <tr id="row-{{ loop.index0 }}">
           <td>{{ loop.index }}</td>
-          <td>{{ m.game_count }}</td>
+          <td>{{ m.pair_count }}</td>
           <td>{{ m.avg_cp_loss }}</td>
           <td>{{ m.user_move }}</td>
           <td>
@@ -118,7 +118,7 @@ function show() {
   board.orientation(orientation);
   board.position(m.fen, false);
   document.getElementById('info').innerHTML =
-    `<p>Frequency: ${m.game_count}</p><p>Your move: ${m.user_move}</p>`;
+    `<p>Frequency: ${m.pair_count}</p><p>Your move: ${m.user_move}</p>`;
   highlightRow();
 }
 
@@ -168,7 +168,7 @@ function renderTable() {
     const row = document.createElement('tr');
     row.id = `row-${i}`;
     row.innerHTML = `<td>${i+1}</td>`+
-      `<td>${m.game_count}</td>`+
+      `<td>${m.pair_count}</td>`+
       `<td>${m.avg_cp_loss}</td>`+
       `<td>${m.user_move}</td>`+
       `<td><button class="btn btn-primary btn-sm" onclick="loadMistake(${i})">Show</button> `+
