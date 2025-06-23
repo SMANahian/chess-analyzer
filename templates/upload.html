@@ -11,13 +11,27 @@
 </head>
 <body>
     <h1>Welcome {{ username }}</h1>
-    <p>Upload a <strong>.pgn</strong> file containing your games.</p>
+    <p>Upload <strong>.pgn</strong> files for your games. You may provide one or both files but at least one is required.</p>
     <div class="container">
-        <form action="/upload" method="post" enctype="multipart/form-data">
-            <input type="file" name="pgn_file" required>
+        <form action="/upload" method="post" enctype="multipart/form-data" onsubmit="return validate()">
+            <label>White games:<br><input type="file" name="white_pgn"></label>
+            <br>
+            <label>Black games:<br><input type="file" name="black_pgn"></label>
             <br>
             <input type="submit" value="Upload">
         </form>
+        {% if error %}<p style="color:red;">{{ error }}</p>{% endif %}
     </div>
+    <script>
+    function validate(){
+        const w = document.querySelector('input[name="white_pgn"]').value;
+        const b = document.querySelector('input[name="black_pgn"]').value;
+        if(!w && !b){
+            alert('Please select at least one PGN file.');
+            return false;
+        }
+        return true;
+    }
+    </script>
 </body>
 </html>
