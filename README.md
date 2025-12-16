@@ -25,8 +25,13 @@ matter most.
 - Python 3.10 or later
 - [Flask](https://flask.palletsprojects.com/) and
   [python-chess](https://python-chess.readthedocs.io/)
-- A Stockfish binary accessible at `./stockfish/stockfish` (one is included for
-  convenience, but you can replace it with a newer version for your platform).
+- A Stockfish binary. One is included at `./stockfish`, but it may not match
+  your OS/CPU; you can point to a working engine via
+  `STOCKFISH_PATH=/path/to/stockfish`.
+
+If you don't have Stockfish installed yet:
+- macOS: `brew install stockfish`
+- Ubuntu/Debian: `sudo apt-get install stockfish`
 
 Create a virtual environment and install the required packages:
 
@@ -35,6 +40,11 @@ python -m venv .venv
 source .venv/bin/activate
 pip install flask python-chess
 ```
+Or install from `requirements.txt`:
+
+```bash
+pip install -r requirements.txt
+```
 
 ## Running the application
 
@@ -42,6 +52,13 @@ pip install flask python-chess
    ```bash
    export SECRET_KEY="change-me"
    ```
+   You can also tweak analysis settings via environment variables:
+   - `ANALYSIS_DEPTH` (default: 14)
+   - `OPENING_PLIES_LIMIT` (default: 20 plies = 10 full moves)
+   - `MISTAKE_THRESHOLD_CP` (default: 100; only show mistakes with ≥ this centipawn loss)
+   - `MIN_PAIR_OCCURRENCES` (default: 2)
+   - `MAX_REQUEST_SIZE_MB` (default: 4)
+   - `STOCKFISH_THREADS`, `STOCKFISH_HASH_MB` (optional engine tuning)
 2. Start the Flask development server:
    ```bash
    python app.py
@@ -67,8 +84,9 @@ log in. PGN files, analysis JSON, and processing flags live in this directory.
 ```
 assets/        # Static files served by Flask
 app.py         # Flask application, routes, and analysis workflow
-stockfish/     # Bundled Stockfish engine binary
+stockfish      # Bundled Stockfish engine binary
 templates/     # Jinja templates for the HTML interface
+requirements.txt
 ```
 
 ## Disclaimer

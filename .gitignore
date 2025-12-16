@@ -1,2 +1,23 @@
+# Virtualenvs
+/.venv/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+
+# Logs and coverage
+*.log
+app.log
+.coverage
+htmlcov/
+
+# Local data
+/database/
 *.pgn
-*.json
+*.processing
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/
+.env

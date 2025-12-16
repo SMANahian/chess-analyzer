@@ -1,13 +1,37 @@
 {% extends 'base.html' %}
 {% block content %}
 <h1>Training</h1>
+{% if not engine_ok %}
+<div class="alert alert-warning">
+  <div class="fw-semibold mb-1">Stockfish is not available</div>
+  <div class="mb-2">{{ engine_status }}</div>
+  {% if bundled_stockfish_note %}
+    <div class="text-muted small mb-2">{{ bundled_stockfish_note }}</div>
+  {% endif %}
+  {% if engine_install_label and engine_install_value %}
+    <div class="mb-2">
+      {{ engine_install_label }}
+      {% if engine_install_value.startswith('http') %}
+        <a href="{{ engine_install_value }}" target="_blank">{{ engine_install_value }}</a>
+      {% else %}
+        <code>{{ engine_install_value }}</code>
+      {% endif %}
+    </div>
+  {% endif %}
+  <div class="mb-0">Or set <code>STOCKFISH_PATH</code> to your engine binary.</div>
+</div>
+{% else %}
+<div class="alert alert-secondary py-2">
+  {{ engine_status }} · Depth {{ analysis_depth }} · Opening limit {{ opening_plies_limit }} plies · Min frequency {{ min_pair_occurrences }} · Mistake threshold {{ mistake_threshold_cp }}cp
+</div>
+{% endif %}
 <form action="{{ url_for('train_color', color='white') }}" method="post" class="mt-3">
-    <button type="submit" class="btn btn-primary">Analyze White</button>
+    <button type="submit" class="btn btn-primary" {% if not engine_ok %}disabled{% endif %}>Analyze White</button>
 </form>
 <form action="{{ url_for('train_color', color='black') }}" method="post" class="mt-3">
-    <button type="submit" class="btn btn-primary">Analyze Black</button>
+    <button type="submit" class="btn btn-primary" {% if not engine_ok %}disabled{% endif %}>Analyze Black</button>
 </form>
 <form action="{{ url_for('train_color', color='both') }}" method="post" class="mt-3">
-    <button type="submit" class="btn btn-primary">Analyze Both</button>
+    <button type="submit" class="btn btn-primary" {% if not engine_ok %}disabled{% endif %}>Analyze Both</button>
 </form>
 {% endblock %}
