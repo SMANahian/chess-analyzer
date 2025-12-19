@@ -1,0 +1,171 @@
+{% extends 'base.html' %}
+{% block content %}
+<!-- Hero Section -->
+<div class="hero-section text-center py-5">
+    <div class="container">
+        <div class="hero-badge mb-3">
+            <span class="badge-soft">♔ Chess Opening Trainer</span>
+        </div>
+        <h1 class="display-4 fw-bold mb-3">
+            Master Your <span class="gradient-text">Opening Repertoire</span>
+        </h1>
+        <p class="lead text-muted mb-4" style="max-width: 600px; margin: 0 auto;">
+            Upload your games, analyze mistakes with Stockfish, and train the positions that matter most.
+            Focus on your real weaknesses, not random puzzles.
+        </p>
+        <div class="d-flex gap-3 justify-content-center flex-wrap">
+            <a href="{{ url_for('register') }}" class="btn btn-primary btn-lg px-4">
+                Get Started Free
+            </a>
+            <a href="{{ url_for('login') }}" class="btn btn-outline-light btn-lg px-4">
+                Sign In
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Features Section -->
+<div class="features-section py-5">
+    <div class="container">
+        <h2 class="text-center mb-5">How It Works</h2>
+        <div class="row g-4">
+            <div class="col-md-4">
+                <div class="feature-card">
+                    <div class="feature-icon">📁</div>
+                    <h4>1. Upload Your Games</h4>
+                    <p class="text-muted">
+                        Export PGN files from your favorite chess platform or 
+                        <a href="https://www.openingtree.com/" target="_blank">OpeningTree</a>. 
+                        Upload separately for White and Black.
+                    </p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="feature-card">
+                    <div class="feature-icon">🔍</div>
+                    <h4>2. Stockfish Analysis</h4>
+                    <p class="text-muted">
+                        Our engine analyzes your opening moves and identifies recurring mistakes.
+                        Only positions you've played multiple times are highlighted.
+                    </p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <h4>3. Train Efficiently</h4>
+                    <p class="text-muted">
+                        Drill the top engine moves for your weak positions.
+                        Delete mistakes once mastered to keep your queue focused.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Stats Section -->
+<div class="stats-section py-5">
+    <div class="container">
+        <div class="row g-4 text-center">
+            <div class="col-md-3">
+                <div class="stat-highlight">
+                    <div class="stat-number">20</div>
+                    <div class="stat-text">Ply Analysis Depth</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-highlight">
+                    <div class="stat-number">5</div>
+                    <div class="stat-text">Engine Lines</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-highlight">
+                    <div class="stat-number">1000</div>
+                    <div class="stat-text">Games Per Upload</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-highlight">
+                    <div class="stat-number">∞</div>
+                    <div class="stat-text">Training Sessions</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- CTA Section -->
+<div class="cta-section py-5">
+    <div class="container">
+        <div class="cta-card text-center p-5">
+            <h3 class="mb-3">Ready to Improve Your Openings?</h3>
+            <p class="text-muted mb-4">Create your free account and start analyzing your games today.</p>
+            <a href="{{ url_for('register') }}" class="btn btn-primary btn-lg">
+                Create Free Account
+            </a>
+        </div>
+    </div>
+</div>
+
+<style>
+.hero-section {
+    padding-top: 80px;
+}
+
+.gradient-text {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.feature-card {
+    background: linear-gradient(145deg, rgba(15, 23, 42, 0.95), rgba(17, 24, 39, 0.9));
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 2rem;
+    height: 100%;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.feature-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}
+
+.feature-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+.stat-highlight {
+    padding: 1.5rem;
+}
+
+.stat-number {
+    font-size: 3rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.stat-text {
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.cta-card {
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(192, 132, 252, 0.15));
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    border-radius: 24px;
+}
+
+.hero-badge {
+    display: inline-block;
+}
+</style>
+{% endblock %}

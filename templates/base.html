@@ -2,40 +2,326 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Chess Analyzer - Analyze and train your chess opening repertoire with Stockfish">
+    <meta name="theme-color" content="#0b1220">
     <title>{{ title or 'Chess Analyzer' }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
-        body{ padding-top:3em; }
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            z-index: 1100;
+            max-width: 400px;
+        }
+        
+        .toast {
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+        
+        .toast.toast-success {
+            border-left: 4px solid var(--success);
+        }
+        
+        .toast.toast-danger {
+            border-left: 4px solid var(--danger);
+        }
+        
+        .toast.toast-warning {
+            border-left: 4px solid #f59e0b;
+        }
+        
+        .toast.toast-info {
+            border-left: 4px solid var(--accent);
+        }
+        
+        .toast-header {
+            background: transparent;
+            border-bottom: 1px solid var(--border);
+            color: var(--text);
+        }
+        
+        .toast-body {
+            color: var(--text);
+        }
+        
+        /* Loading Overlay */
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(11, 18, 32, 0.8);
+            z-index: 1200;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(4px);
+        }
+        
+        .loading-overlay.active {
+            display: flex;
+        }
+        
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Mobile improvements */
+        @media (max-width: 768px) {
+            .navbar-brand {
+                font-size: 1.1rem;
+            }
+            
+            .hero-section h1 {
+                font-size: 2rem;
+            }
+            
+            .stat-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .btn-lg {
+                padding: 0.5rem 1rem;
+                font-size: 1rem;
+            }
+        }
+        
+        /* Smooth transitions */
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        /* Active nav link */
+        .nav-link.active {
+            color: var(--accent) !important;
+            position: relative;
+        }
+        
+        .nav-link.active::after {
+            content: '';
+            position: absolute;
+            bottom: -4px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 20px;
+            height: 2px;
+            background: var(--accent);
+            border-radius: 1px;
+        }
+        
+        /* Dropdown improvements */
+        .dropdown-menu {
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid var(--border);
+            backdrop-filter: blur(10px);
+        }
+        
+        .dropdown-item {
+            color: var(--text);
+        }
+        
+        .dropdown-item:hover {
+            background: rgba(56, 189, 248, 0.1);
+            color: var(--accent);
+        }
+        
+        .dropdown-divider {
+            border-color: var(--border);
+        }
     </style>
 </head>
 <body>
-<nav class="navbar navbar-dark bg-dark fixed-top">
-  <div class="container-fluid">
-    <a class="navbar-brand" href="{{ url_for('home') }}">Chess Analyzer</a>
-    {% if session.get('username') %}
-      <ul class="navbar-nav flex-row mx-auto">
-        <li class="nav-item mx-2"><a class="nav-link" href="{{ url_for('upload') }}">Upload</a></li>
-        <li class="nav-item mx-2"><a class="nav-link" href="{{ url_for('train') }}">Train</a></li>
-        <li class="nav-item mx-2"><a class="nav-link" href="{{ url_for('analysis_color', color='white') }}">White</a></li>
-        <li class="nav-item mx-2"><a class="nav-link" href="{{ url_for('analysis_color', color='black') }}">Black</a></li>
-      </ul>
-      <ul class="navbar-nav flex-row ms-auto align-items-center">
-        <li class="nav-item me-3 text-white">Hello {{ session.username }}</li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('logout') }}">Logout</a></li>
-      </ul>
-    {% else %}
-      <ul class="navbar-nav ms-auto flex-row">
-        <li class="nav-item mx-2"><a class="nav-link" href="{{ url_for('login') }}">Login</a></li>
-        <li class="nav-item mx-2"><a class="nav-link" href="{{ url_for('register') }}">Register</a></li>
-      </ul>
-    {% endif %}
-  </div>
-</nav>
-<div class="container mt-4">
-{% block content %}{% endblock %}
+<!-- Loading Overlay -->
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="text-center">
+        <div class="loading-spinner mx-auto mb-3"></div>
+        <div class="text-muted" id="loadingText">Loading...</div>
+    </div>
 </div>
-<footer class="text-center mt-4 mb-3">
-  <p class="text-muted mb-0">Project created by <a href="https://smanahian.com" target="_blank">S M A Nahian</a> and vibecoding with ChatGPT Codex.</p>
+
+<!-- Navigation -->
+<nav class="navbar navbar-expand-lg navbar-dark shadow-sm glass-nav fixed-top">
+    <div class="container-fluid">
+        <a class="navbar-brand fw-semibold d-flex align-items-center gap-2" href="{{ url_for('home') }}">
+            <span style="font-size: 1.3rem;">♔</span>
+            <span>Chess Analyzer</span>
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu" aria-controls="navMenu" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navMenu">
+            {% if session.get('username') %}
+            <ul class="navbar-nav ms-3">
+                <li class="nav-item mx-1">
+                    <a class="nav-link {{ 'active' if request.endpoint == 'upload' }}" href="{{ url_for('upload') }}">
+                        📁 Upload
+                    </a>
+                </li>
+                <li class="nav-item mx-1">
+                    <a class="nav-link {{ 'active' if request.endpoint == 'train' }}" href="{{ url_for('train') }}">
+                        🎓 Train
+                    </a>
+                </li>
+                <li class="nav-item dropdown mx-1">
+                    <a class="nav-link dropdown-toggle {{ 'active' if 'analysis' in (request.endpoint or '') }}" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        📊 Analysis
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="{{ url_for('analysis') }}">📊 Both Colors</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="{{ url_for('analysis_color', color='white') }}">⬜ White</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('analysis_color', color='black') }}">⬛ Black</a></li>
+                    </ul>
+                </li>
+            </ul>
+            <ul class="navbar-nav ms-auto align-items-center gap-2">
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle d-flex align-items-center gap-2" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <div class="avatar-circle">{{ session.username[0]|upper }}</div>
+                        <span class="d-none d-md-inline">{{ session.username }}</span>
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><span class="dropdown-item-text text-muted small">Signed in as<br><strong>{{ session.username }}</strong></span></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="{{ url_for('api_export') }}" target="_blank">📥 Export Data</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}">🚪 Logout</a></li>
+                    </ul>
+                </li>
+            </ul>
+            {% else %}
+            <ul class="navbar-nav ms-auto gap-2">
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active' if request.endpoint == 'login' }}" href="{{ url_for('login') }}">Login</a>
+                </li>
+                <li class="nav-item">
+                    <a class="btn btn-primary btn-sm" href="{{ url_for('register') }}">Get Started</a>
+                </li>
+            </ul>
+            {% endif %}
+        </div>
+    </div>
+</nav>
+
+<!-- Background Effects -->
+<div class="page-bg"></div>
+
+<!-- Toast Container for Flash Messages -->
+<div class="toast-container" id="toastContainer">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="toast toast-{{ category }} fade-in" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="true" data-bs-delay="5000">
+                <div class="toast-header">
+                    <strong class="me-auto">
+                        {% if category == 'success' %}✓ Success
+                        {% elif category == 'danger' %}✕ Error
+                        {% elif category == 'warning' %}⚠ Warning
+                        {% else %}ℹ Notice{% endif %}
+                    </strong>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+                <div class="toast-body">
+                    {{ message }}
+                </div>
+            </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+</div>
+
+<!-- Main Content -->
+<div class="container mt-5 pt-4 fade-in">
+    {% block content %}{% endblock %}
+</div>
+
+<!-- Footer -->
+<footer class="text-center mt-5 mb-4 text-muted small">
+    <div class="container">
+        <hr class="my-4" style="border-color: var(--border);">
+        <p class="mb-1">
+            Built with ♥ by <a href="https://smanahian.com" target="_blank" class="text-decoration-none">S M A Nahian</a>
+        </p>
+        <p class="mb-0 small">
+            Powered by <a href="https://stockfishchess.org/" target="_blank" class="text-decoration-none">Stockfish</a> · 
+            <a href="https://github.com/SMANahian/chess-analyzer" target="_blank" class="text-decoration-none">GitHub</a>
+        </p>
+    </div>
 </footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // Initialize toasts
+    document.addEventListener('DOMContentLoaded', function() {
+        const toastElList = document.querySelectorAll('.toast');
+        toastElList.forEach(function(toastEl) {
+            const toast = new bootstrap.Toast(toastEl);
+            toast.show();
+        });
+    });
+    
+    // Loading overlay helpers
+    function showLoading(text = 'Loading...') {
+        document.getElementById('loadingText').textContent = text;
+        document.getElementById('loadingOverlay').classList.add('active');
+    }
+    
+    function hideLoading() {
+        document.getElementById('loadingOverlay').classList.remove('active');
+    }
+    
+    // Show toast notification
+    function showToast(message, type = 'info') {
+        const container = document.getElementById('toastContainer');
+        const toastHtml = `
+            <div class="toast toast-${type} fade-in" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="toast-header">
+                    <strong class="me-auto">
+                        ${type === 'success' ? '✓ Success' : type === 'danger' ? '✕ Error' : type === 'warning' ? '⚠ Warning' : 'ℹ Notice'}
+                    </strong>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+                <div class="toast-body">${message}</div>
+            </div>
+        `;
+        container.insertAdjacentHTML('beforeend', toastHtml);
+        const newToast = container.lastElementChild;
+        const toast = new bootstrap.Toast(newToast, { delay: 5000 });
+        toast.show();
+        newToast.addEventListener('hidden.bs.toast', () => newToast.remove());
+    }
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', function(e) {
+        // Escape to close modals/overlays
+        if (e.key === 'Escape') {
+            hideLoading();
+        }
+    });
+</script>
 </body>
 </html>
