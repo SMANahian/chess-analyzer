@@ -68,7 +68,6 @@ nav.glass-nav {
 
 .container {
   position: relative;
-  z-index: 1;
 }
 
 /* Typography */
@@ -693,4 +692,39 @@ th:hover .sort-icon {
 .dropdown-item.text-danger:hover {
   background: rgba(239, 68, 68, 0.12);
   color: #fecaca !important;
+}
+
+/* Modals (Bootstrap) */
+.modal-content {
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(17, 24, 39, 0.95));
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 18px;
+  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.45);
+}
+
+.modal-header,
+.modal-footer {
+  border-color: var(--border);
+}
+
+.modal-backdrop.show {
+  opacity: 0.65;
+}
+
+/* Keyboard keys */
+kbd {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-bottom-color: rgba(255, 255, 255, 0.18);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.85em;
+}
+
+/* chessboard.js: ensure dragged/animated pieces render above the app container */
+body > img.piece-417db {
+  z-index: 1040;
+  pointer-events: none;
 }

@@ -1,8 +1,7 @@
 {% extends 'base.html' %}
 {% block content %}
 
-<!-- Chess Board CSS from CDN -->
-<link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/chessboard.css') }}">
 <style>
   /* Custom board styling */
   #board {
@@ -154,7 +153,8 @@
     </div>
     <div class="d-flex gap-2 align-items-center">
       <button class="btn btn-outline-secondary btn-sm" onclick="showStats()">📊 Stats</button>
-      <button class="btn btn-outline-secondary btn-sm" onclick="showSettings()">⚙️ Settings</button>
+      <button class="btn btn-outline-primary btn-sm" id="quizToggleBtn" onclick="toggleQuizMode()">🧩 Quiz</button>
+      <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#settingsModal">⚙️ Settings</button>
       <div class="text-end ms-3">
         <div class="badge bg-primary">≥ {{ threshold_cp or 100 }} cp</div>
         <div class="text-muted small">Depth: {{ opening_plies_limit or 20 }} plies</div>
@@ -171,8 +171,14 @@
       <div class="card-body">
         <!-- Board Container -->
         <div id="board" style="width: 100%;"></div>
-        <div class="d-flex justify-content-between align-items-center mt-2">
-          <div id="boardStatus" class="text-muted small">Click/tap a piece, then click/tap a target square.</div>
+        <div class="d-flex justify-content-between align-items-center mt-2 flex-wrap gap-2">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span id="modeBadge" class="badge bg-info">Trainer</span>
+            <div id="boardStatus" class="text-muted small">Click/tap a piece, then click/tap a target square.</div>
+          </div>
+          <div id="quizHud" class="text-muted small d-none">
+            Score: <span id="quizCorrect">0</span>/<span id="quizTotal">0</span>
+          </div>
           <div class="text-muted small d-none d-md-block"><kbd>H</kbd> hint · <kbd>R</kbd> reset · <kbd>Esc</kbd> clear</div>
         </div>
         
@@ -210,6 +216,9 @@
           <div class="col-12">
             <a id="lichessLink" class="btn btn-outline-secondary w-100 btn-sm" href="#" target="_blank" rel="noopener">🔗 Analyze current position</a>
           </div>
+          <div class="col-12">
+            <button class="btn btn-outline-danger w-100 btn-sm" onclick="deleteCurrentMistake()">✅ Mark as mastered (remove)</button>
+          </div>
         </div>
       </div>
     </div>
@@ -219,7 +228,7 @@
   <div class="col-lg-6">
     <div class="card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.1);">
       <div class="card-header d-flex justify-content-between align-items-center">
-        <h5 class="mb-0">📋 Mistake List <span class="badge bg-primary">{{ mistakes|length }}</span></h5>
+        <h5 class="mb-0">📋 Mistake List <span id="mistakeCount" class="badge bg-primary">{{ mistakes|length }}</span></h5>
         <div>
           <button class="btn btn-outline-secondary btn-sm" onclick="exportMistakes()">📤 Export</button>
           <button class="btn btn-outline-secondary btn-sm" onclick="printMistakes()">🖨️ Print</button>
@@ -245,26 +254,294 @@
   </div>
 </div>
 
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
-<script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+<script src="{{ url_for('static', filename='js/jquery-3.6.0.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chess.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chessboard.js') }}"></script>
+
+<!-- Settings Modal -->
+<div class="modal fade" id="settingsModal" tabindex="-1" aria-labelledby="settingsModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="settingsModalLabel">⚙️ Training Settings</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-4">
+          <div class="col-md-6">
+            <h6 class="mb-3">Board</h6>
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" id="settingEnableDrag">
+              <label class="form-check-label" for="settingEnableDrag">Enable drag &amp; drop</label>
+            </div>
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" id="settingShowCoords">
+              <label class="form-check-label" for="settingShowCoords">Show coordinates</label>
+            </div>
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" id="settingHighlightMoves">
+              <label class="form-check-label" for="settingHighlightMoves">Show legal move hints</label>
+            </div>
+          </div>
+
+          <div class="col-md-6">
+            <h6 class="mb-3">Trainer</h6>
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" id="settingAutoAdvance">
+              <label class="form-check-label" for="settingAutoAdvance">Auto-advance after correct move</label>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="settingAcceptTopN">Accept top moves (N)</label>
+              <input type="number" class="form-control" id="settingAcceptTopN" min="1" max="5" step="1">
+              <div class="form-text">1 = only the best move, 3 = any of the top 3.</div>
+            </div>
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label" for="settingMinCp">Min CP loss</label>
+                <input type="number" class="form-control" id="settingMinCp" min="0" step="10">
+              </div>
+              <div class="col-6">
+                <label class="form-label" for="settingMinFreq">Min frequency</label>
+                <input type="number" class="form-control" id="settingMinFreq" min="1" step="1">
+              </div>
+            </div>
+          </div>
+
+          <div class="col-12">
+            <hr style="border-color: var(--border);">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <div>
+                <h6 class="mb-1">Quiz Mode</h6>
+                <div class="text-muted small">Hide best moves and track your score while reviewing positions.</div>
+              </div>
+              <div class="d-flex gap-3 flex-wrap align-items-center">
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" id="settingQuizMode">
+                  <label class="form-check-label" for="settingQuizMode">Enable quiz</label>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" id="settingQuizShuffle">
+                  <label class="form-check-label" for="settingQuizShuffle">Shuffle order</label>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" id="settingQuizHideBestMoves">
+                  <label class="form-check-label" for="settingQuizHideBestMoves">Hide best moves panel</label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="resetSettingsBtn">Reset defaults</button>
+        <button type="button" class="btn btn-primary" id="applySettingsBtn" data-bs-dismiss="modal">Apply</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>
-// Global state
-const allMistakes = {{ mistakes|tojson }};
+const USERNAME = {{ session.username|tojson }};
+const DEFAULT_THRESHOLD_CP = {{ threshold_cp or 100 }};
+const ALL_MISTAKES_FROM_SERVER = {{ mistakes|tojson }};
+
+const SETTINGS_STORAGE_KEY = `chess-analyzer:analysis-settings:v1:${USERNAME}`;
+const DEFAULT_SETTINGS = {
+  enableDrag: true,
+  showCoords: true,
+  highlightMoves: true,
+  autoAdvance: true,
+  acceptTopN: 1,
+  minCp: DEFAULT_THRESHOLD_CP,
+  minFreq: 1,
+  quizMode: false,
+  quizShuffle: true,
+  quizHideBestMoves: true,
+};
+
+let settings = loadSettings();
+let mistakesAll = Array.isArray(ALL_MISTAKES_FROM_SERVER) ? ALL_MISTAKES_FROM_SERVER.slice() : [];
+let mistakesView = [];
+
 let currentIndex = 0;
 let board = null;
 let game = null;
 let flipped = false;
-let boardOrientation = '{{ "black" if color == "black" else "white" }}';
 let selectedSquare = null;
 let suppressInputUntil = 0;
 let hintTimer = null;
 
+const DEFAULT_BOARD_ORIENTATION = '{{ "black" if color == "black" else "white" }}';
 const SQUARE_CLASS = 'square-55d63';
 
+let quiz = {
+  active: false,
+  correct: 0,
+  total: 0,
+  solved: new Set(),
+};
+
+function toast(message, type = 'info') {
+  if (typeof window.showToast === 'function') {
+    window.showToast(message, type);
+    return;
+  }
+  console.log(`[${type}] ${message}`);
+}
+
+function clampInt(value, min, max, fallback) {
+  const n = Number.parseInt(value, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function mistakeKey(m) {
+  const color = m && m.color ? m.color : 'unknown';
+  if (m && Number.isInteger(m.source_index)) return `${color}:${m.source_index}`;
+  return `${color}:${m && m.fen ? m.fen : ''}`;
+}
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_SETTINGS };
+    const parsed = JSON.parse(raw);
+    return normalizeSettings(parsed);
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+function saveSettings(next) {
+  settings = normalizeSettings(next);
+  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+}
+
+function normalizeSettings(s) {
+  const next = { ...DEFAULT_SETTINGS, ...(s && typeof s === 'object' ? s : {}) };
+  next.enableDrag = Boolean(next.enableDrag);
+  next.showCoords = Boolean(next.showCoords);
+  next.highlightMoves = Boolean(next.highlightMoves);
+  next.autoAdvance = Boolean(next.autoAdvance);
+  next.acceptTopN = clampInt(next.acceptTopN, 1, 5, DEFAULT_SETTINGS.acceptTopN);
+  next.minCp = clampInt(next.minCp, 0, 9999, DEFAULT_SETTINGS.minCp);
+  next.minFreq = clampInt(next.minFreq, 1, 9999, DEFAULT_SETTINGS.minFreq);
+  next.quizMode = Boolean(next.quizMode);
+  next.quizShuffle = Boolean(next.quizShuffle);
+  next.quizHideBestMoves = Boolean(next.quizHideBestMoves);
+  return next;
+}
+
 function getCurrentMistake() {
-  return allMistakes[currentIndex];
+  return mistakesView[currentIndex];
+}
+
+function resetQuiz() {
+  quiz = {
+    active: Boolean(settings.quizMode),
+    correct: 0,
+    total: mistakesView.length,
+    solved: new Set(),
+  };
+  updateQuizHud();
+}
+
+function updateModeUI() {
+  const badge = document.getElementById('modeBadge');
+  if (badge) {
+    if (settings.quizMode) {
+      badge.className = 'badge bg-primary';
+      badge.textContent = 'Quiz';
+    } else {
+      badge.className = 'badge bg-info';
+      badge.textContent = 'Trainer';
+    }
+  }
+
+  const hud = document.getElementById('quizHud');
+  if (hud) hud.classList.toggle('d-none', !settings.quizMode);
+
+  const quizBtn = document.getElementById('quizToggleBtn');
+  if (quizBtn) {
+    quizBtn.classList.toggle('btn-outline-primary', !settings.quizMode);
+    quizBtn.classList.toggle('btn-primary', settings.quizMode);
+    quizBtn.textContent = settings.quizMode ? '🧩 Quiz: ON' : '🧩 Quiz';
+  }
+
+  updateBestMovesVisibility();
+}
+
+function updateQuizHud() {
+  const totalEl = document.getElementById('quizTotal');
+  const correctEl = document.getElementById('quizCorrect');
+  if (totalEl) totalEl.textContent = String(quiz.total || mistakesView.length || 0);
+  if (correctEl) correctEl.textContent = String(quiz.correct || 0);
+}
+
+function updateBestMovesVisibility() {
+  const panel = document.querySelector('.best-moves-container');
+  if (!panel) return;
+  const hide = settings.quizMode && settings.quizHideBestMoves;
+  panel.classList.toggle('d-none', hide);
+}
+
+function updateMistakeCount() {
+  const el = document.getElementById('mistakeCount');
+  if (el) el.textContent = String(mistakesView.length);
+}
+
+function computeViewMistakes() {
+  const minCp = clampInt(settings.minCp, 0, 9999, DEFAULT_SETTINGS.minCp);
+  const minFreq = clampInt(settings.minFreq, 1, 9999, DEFAULT_SETTINGS.minFreq);
+
+  const filtered = mistakesAll.filter((m) => {
+    const cp = Number(m.avg_cp_loss || 0);
+    const freq = Number(m.pair_count || 1);
+    return cp >= minCp && freq >= minFreq;
+  });
+
+  if (settings.quizMode) {
+    if (settings.quizShuffle) shuffleInPlace(filtered);
+    return filtered;
+  }
+
+  // Default order: higher CP loss first, then frequency
+  filtered.sort((a, b) => (b.avg_cp_loss || 0) - (a.avg_cp_loss || 0) || (b.pair_count || 0) - (a.pair_count || 0));
+  return filtered;
+}
+
+function rebuildView({ keepCurrent = true, resetQuizState = false } = {}) {
+  const currentKey = keepCurrent ? mistakeKey(getCurrentMistake()) : null;
+  mistakesView = computeViewMistakes();
+
+  if (mistakesView.length === 0) {
+    currentIndex = 0;
+  } else if (currentKey) {
+    const idx = mistakesView.findIndex((m) => mistakeKey(m) === currentKey);
+    currentIndex = idx >= 0 ? idx : Math.min(currentIndex, mistakesView.length - 1);
+  } else {
+    currentIndex = Math.min(currentIndex, mistakesView.length - 1);
+  }
+
+  updateMistakeCount();
+  buildMistakesTable();
+
+  if (resetQuizState) resetQuiz();
+
+  if (mistakesView.length > 0) {
+    showPosition(currentIndex);
+  } else {
+    document.getElementById('posCounter').textContent = 'No positions';
+    document.getElementById('bestMovesDisplay').innerHTML = '<span class="text-muted">No mistakes match your filters.</span>';
+  }
 }
 
 function suppressInputFor(ms, opts = {}) {
@@ -328,6 +605,8 @@ function setSelectedSquare(square) {
   clearSelectionHighlights();
   selectedSquare = square;
 
+  if (!settings.highlightMoves) return;
+
   highlightSquare(square, 'board-square-selected');
 
   const moves = game.moves({ square, verbose: true });
@@ -343,11 +622,10 @@ function clearSelectedSquare() {
 
 function updateBoardMeta(m) {
   const statusEl = document.getElementById('boardStatus');
-  if (statusEl && game) {
+  if (statusEl && game && m) {
     const toMove = game.turn() === 'w' ? 'White' : 'Black';
-    const yourColor = (m && m.color) ? (m.color === 'white' ? 'White' : 'Black') : null;
-    const base = yourColor ? `Your move (${yourColor}). Side to move: ${toMove}.` : `Side to move: ${toMove}.`;
-    statusEl.textContent = `${base} Click/tap to move.`;
+    const severity = m.avg_cp_loss >= 300 ? 'Severe' : m.avg_cp_loss >= 180 ? 'High' : 'Moderate';
+    statusEl.textContent = `Side to move: ${toMove} · CP loss: ${m.avg_cp_loss} (${severity}) · Freq: ${m.pair_count || 1}`;
   }
 
   const lichessEl = document.getElementById('lichessLink');
@@ -358,11 +636,19 @@ function updateBoardMeta(m) {
 
 function isCorrectTrainingMove(move) {
   const m = getCurrentMistake();
-  if (!m || !m.top_moves) return true;
+  if (!m || !m.top_moves || m.top_moves.length === 0) return true;
 
+  const n = clampInt(settings.acceptTopN, 1, 5, 1);
   const moveUci = (move.from + move.to + (move.promotion || '')).toLowerCase();
   const base = moveUci.slice(0, 4);
-  return m.top_moves.some((topMove) => (topMove || '').toLowerCase().startsWith(base));
+  return m.top_moves.slice(0, n).some((topMove) => (topMove || '').toLowerCase().startsWith(base));
+}
+
+function maybeFinishQuiz() {
+  if (!settings.quizMode) return;
+  if (mistakesView.length === 0) return;
+  if (currentIndex < mistakesView.length - 1) return;
+  toast(`Quiz complete! Score: ${quiz.correct}/${mistakesView.length}`, 'success');
 }
 
 function handleCorrectMove(move) {
@@ -370,16 +656,35 @@ function handleCorrectMove(move) {
   highlightSquare(move.from, 'board-square-lastmove');
   highlightSquare(move.to, 'board-square-lastmove');
 
+  if (settings.quizMode) {
+    const key = mistakeKey(getCurrentMistake());
+    if (!quiz.solved.has(key)) {
+      quiz.solved.add(key);
+      quiz.correct += 1;
+    }
+    updateQuizHud();
+  }
+
   updateBoardMeta(getCurrentMistake());
-  showToast('✅ Correct! Well done!', 'success');
-  suppressInputFor(1000);
-  setTimeout(() => nextPosition(), 900);
+  toast('✅ Correct!', 'success');
+
+  suppressInputFor(900);
+
+  if (settings.autoAdvance) {
+    setTimeout(() => {
+      if (currentIndex >= mistakesView.length - 1) {
+        maybeFinishQuiz();
+        return;
+      }
+      nextPosition();
+    }, 800);
+  }
 }
 
 function handleWrongMove() {
   clearLastMoveHighlights();
   clearSelectedSquare();
-  showToast('❌ Not the best move. Try again!', 'warning');
+  toast('❌ Not the best move. Try again!', 'warning');
 }
 
 function attemptMove(from, to) {
@@ -388,7 +693,7 @@ function attemptMove(from, to) {
   clearHintHighlights();
   const move = game.move({ from, to, promotion: 'q' });
   if (!move) {
-    showToast('Illegal move.', 'warning');
+    toast('Illegal move.', 'warning');
     return;
   }
 
@@ -404,25 +709,27 @@ function attemptMove(from, to) {
   handleCorrectMove(move);
 }
 
-// Initialize chessboard
-function initBoard() {
-  console.log('Initializing board...');
-  
+function destroyAndRecreateBoard() {
+  if (board) {
+    try { board.destroy(); } catch {}
+    board = null;
+  }
+
   game = new Chess();
-  
   const config = {
     position: 'start',
-    orientation: boardOrientation,
-    draggable: false,
+    orientation: DEFAULT_BOARD_ORIENTATION,
+    draggable: settings.enableDrag,
+    showNotation: settings.showCoords,
     pieceTheme: '/assets/img/chesspieces/wikipedia/{piece}.png',
-    onDragStart: onDragStart,
-    onDrop: onDrop,
-    onSnapEnd: onSnapEnd
+    onDragStart,
+    onDrop,
+    onSnapEnd,
   };
-  
-  board = Chessboard('board', config);
 
-  // Tap-to-move (works great on mobile too)
+  board = ChessBoard('board', config);
+
+  // Click/tap to move
   $('#board')
     .off('click.boardtap')
     .on('click.boardtap', '.' + SQUARE_CLASS, function() {
@@ -430,7 +737,6 @@ function initBoard() {
       const square = squareFromElement(this);
       if (!square) return;
 
-      // If a drag just happened, ignore the click.
       if (Date.now() < suppressInputUntil) return;
 
       const piece = game.get(square);
@@ -454,22 +760,17 @@ function initBoard() {
 
       attemptMove(selectedSquare, square);
     });
-  
-  // Make board responsive
-  $(window).on('resize', function() {
+
+  $(window).off('resize.board').on('resize.board', function() {
     if (board) board.resize();
   });
-  
-  console.log('Board initialized:', board);
 }
 
-function onDragStart(source, piece, position, orientation) {
+function onDragStart(source, piece) {
+  if (!settings.enableDrag) return false;
   if (isInteractionSuppressed()) return false;
+  if (!game || game.game_over()) return false;
 
-  // Don't allow moves if game is over
-  if (game.game_over()) return false;
-  
-  // Only allow dragging pieces of the side to move
   if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
       (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
     return false;
@@ -480,19 +781,27 @@ function onDragStart(source, piece, position, orientation) {
 }
 
 function onDrop(source, target) {
+  if (!settings.enableDrag) return 'snapback';
+  if (!game) return 'snapback';
+  if (isInteractionSuppressed()) return 'snapback';
+
+  clearHintHighlights();
+
+  if (target === 'offboard') {
+    clearSelectedSquare();
+    return 'snapback';
+  }
+
+  if (source === target) {
+    setSelectedSquare(source);
+    return 'snapback';
+  }
+
   clearSelectedSquare();
 
-  // See if the move is legal
-  const move = game.move({
-    from: source,
-    to: target,
-    promotion: 'q' // Always promote to queen for simplicity
-  });
-  
-  // Illegal move
+  const move = game.move({ from: source, to: target, promotion: 'q' });
   if (move === null) return 'snapback';
-  
-  // Check if this is a correct move
+
   if (!isCorrectTrainingMove(move)) {
     game.undo();
     handleWrongMove();
@@ -503,51 +812,43 @@ function onDrop(source, target) {
 }
 
 function onSnapEnd() {
+  if (!board || !game) return;
   board.position(game.fen());
   updateBoardMeta(getCurrentMistake());
 }
 
-// Show position
 function showPosition(idx) {
-  if (idx < 0 || idx >= allMistakes.length) return;
-  
+  if (idx < 0 || idx >= mistakesView.length) return;
   currentIndex = idx;
-  const m = allMistakes[idx];
+  const m = mistakesView[idx];
+  if (!m) return;
 
   clearAllHighlights();
-  
-  // Initialize game with the FEN
-  game = new Chess(m.fen);
-  
-  // Update board orientation based on user color (fallback: side to move)
-  const orientation = m.color ? m.color : (game.turn() === 'w' ? 'white' : 'black');
-  if (!flipped) {
-    board.orientation(orientation);
-  }
-  board.position(m.fen, true);
-  
-  // Display best moves
-  displayBestMoves(m);
-  
-  // Update counter
-  document.getElementById('posCounter').textContent = `Position ${idx + 1}`;
 
-  // Navigation button states
+  game = new Chess(m.fen);
+  const orientation = m.color ? m.color : (game.turn() === 'w' ? 'white' : 'black');
+  if (!flipped) board.orientation(orientation);
+  board.position(m.fen, true);
+
+  displayBestMoves(m);
+
+  const posCounter = document.getElementById('posCounter');
+  if (posCounter) posCounter.textContent = `Position ${idx + 1} of ${mistakesView.length}`;
+
   const btnFirst = document.getElementById('btnFirst');
   const btnPrev = document.getElementById('btnPrev');
   const btnNext = document.getElementById('btnNext');
   const btnLast = document.getElementById('btnLast');
   if (btnFirst) btnFirst.disabled = idx === 0;
   if (btnPrev) btnPrev.disabled = idx === 0;
-  if (btnNext) btnNext.disabled = idx === allMistakes.length - 1;
-  if (btnLast) btnLast.disabled = idx === allMistakes.length - 1;
-  
-  // Highlight current row in table
-  document.querySelectorAll('#mistakesTableBody tr').forEach((tr, i) => {
-    tr.classList.toggle('table-active', i === idx);
+  if (btnNext) btnNext.disabled = idx === mistakesView.length - 1;
+  if (btnLast) btnLast.disabled = idx === mistakesView.length - 1;
+
+  document.querySelectorAll('#mistakesTableBody tr[data-idx]').forEach((tr) => {
+    tr.classList.toggle('table-active', Number(tr.getAttribute('data-idx')) === idx);
   });
 
-  const activeRow = document.querySelector('#mistakesTableBody tr.table-active');
+  const activeRow = document.querySelector(`#mistakesTableBody tr.table-active`);
   if (activeRow) activeRow.scrollIntoView({ block: 'nearest' });
 
   updateBoardMeta(m);
@@ -555,72 +856,79 @@ function showPosition(idx) {
 
 function displayBestMoves(m) {
   const container = document.getElementById('bestMovesDisplay');
+  if (!container) return;
+
+  if (settings.quizMode && settings.quizHideBestMoves) {
+    container.innerHTML = '<span class="text-muted">Hidden in quiz mode.</span>';
+    return;
+  }
+
   if (!m.top_moves || m.top_moves.length === 0) {
     container.innerHTML = '<span class="text-muted">No suggestions available</span>';
     return;
   }
-  
+
   const moves = m.top_moves.slice(0, 3).map((uci, i) => {
     const tempGame = new Chess(m.fen);
     const move = tempGame.move({
-      from: uci.slice(0, 2), 
-      to: uci.slice(2, 4), 
+      from: uci.slice(0, 2),
+      to: uci.slice(2, 4),
       promotion: uci[4] || undefined
     });
     const san = move ? move.san : uci;
     const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
     return `<span class="best-move-badge" onclick="previewMove('${uci}')" title="Click to preview">${medal} ${san}</span>`;
   });
-  
+
   container.innerHTML = moves.join('');
 }
 
 function previewMove(uci) {
   if (isInteractionSuppressed()) return;
-  const m = allMistakes[currentIndex];
+  const m = getCurrentMistake();
+  if (!m) return;
+
   const tempGame = new Chess(m.fen);
   const move = tempGame.move({
     from: uci.slice(0, 2),
     to: uci.slice(2, 4),
     promotion: uci[4] || undefined
   });
-  
-  if (move) {
-    clearAllHighlights();
-    highlightSquare(move.from, 'board-square-hint');
-    highlightSquare(move.to, 'board-square-hint');
 
-    suppressInputFor(1600, { blockPointerEvents: true });
-    board.position(tempGame.fen(), true);
-    setTimeout(() => {
-      board.position(m.fen, true);
-      clearHintHighlights();
-    }, 1500);
-  }
+  if (!move) return;
+
+  clearAllHighlights();
+  highlightSquare(move.from, 'board-square-hint');
+  highlightSquare(move.to, 'board-square-hint');
+
+  suppressInputFor(1600, { blockPointerEvents: true });
+  board.position(tempGame.fen(), true);
+  setTimeout(() => {
+    board.position(m.fen, true);
+    clearHintHighlights();
+  }, 1500);
 }
 
-// Navigation
 function firstPosition() { showPosition(0); }
 function prevPosition() { showPosition(currentIndex - 1); }
 function nextPosition() { showPosition(currentIndex + 1); }
-function lastPosition() { showPosition(allMistakes.length - 1); }
+function lastPosition() { showPosition(mistakesView.length - 1); }
 
-// Controls
 function flipBoardFunc() {
   flipped = !flipped;
   board.flip();
 }
 
 function resetPosition() {
-  if (!allMistakes || allMistakes.length === 0) return;
+  if (!mistakesView || mistakesView.length === 0) return;
   showPosition(currentIndex);
-  showToast('↩ Position reset.', 'info');
+  toast('↩ Position reset.', 'info');
 }
 
 function showHint() {
   const m = getCurrentMistake();
   if (!m || !m.top_moves || m.top_moves.length === 0) {
-    showToast('No hint available for this position.', 'info');
+    toast('No hint available for this position.', 'info');
     return;
   }
 
@@ -634,7 +942,7 @@ function showHint() {
   clearHintHighlights();
   highlightSquare(from, 'board-square-hint');
   highlightSquare(to, 'board-square-hint');
-  showToast(`💡 Hint: ${label}`, 'info');
+  toast(`💡 Hint: ${label}`, 'info');
 
   hintTimer = setTimeout(() => {
     clearHintHighlights();
@@ -645,28 +953,23 @@ function copyFEN() {
   if (!game) return;
   const fen = game.fen();
   navigator.clipboard.writeText(fen).then(() => {
-    showToast('📋 FEN copied to clipboard!', 'success');
+    toast('📋 FEN copied to clipboard!', 'success');
   }).catch(() => {
-    // Fallback
     prompt('Copy FEN:', fen);
   });
 }
 
 function showStats() {
-  const total = allMistakes.length;
-  const severe = allMistakes.filter(m => m.avg_cp_loss >= 300).length;
-  const high = allMistakes.filter(m => m.avg_cp_loss >= 180 && m.avg_cp_loss < 300).length;
+  const list = mistakesView.length ? mistakesView : mistakesAll;
+  const total = list.length;
+  const severe = list.filter(m => m.avg_cp_loss >= 300).length;
+  const high = list.filter(m => m.avg_cp_loss >= 180 && m.avg_cp_loss < 300).length;
   const moderate = total - severe - high;
-  
   alert(`📊 Statistics\n\nTotal Mistakes: ${total}\n🔴 Severe (300+ cp): ${severe}\n🟠 High (180-299 cp): ${high}\n🟢 Moderate (<180 cp): ${moderate}`);
 }
 
-function showSettings() {
-  alert('⚙️ Settings\n\nSettings panel coming soon!\n\nCurrent: Threshold ≥100cp, Depth 20 plies');
-}
-
 function exportMistakes() {
-  const data = JSON.stringify(allMistakes, null, 2);
+  const data = JSON.stringify(mistakesView.length ? mistakesView : mistakesAll, null, 2);
   const blob = new Blob([data], {type: 'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -674,56 +977,54 @@ function exportMistakes() {
   a.download = 'mistakes.json';
   a.click();
   URL.revokeObjectURL(url);
-  showToast('📤 Mistakes exported!', 'success');
+  toast('📤 Mistakes exported!', 'success');
 }
 
 function printMistakes() {
   window.print();
 }
 
-function showToast(message, type) {
-  // Simple toast notification
-  const toast = document.createElement('div');
-  toast.className = `alert alert-${type === 'success' ? 'success' : type === 'warning' ? 'warning' : 'info'} position-fixed`;
-  toast.style.cssText = 'top: 80px; right: 20px; z-index: 9999; animation: fadeIn 0.3s;';
-  toast.textContent = message;
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 2000);
-}
-
-// Build mistakes table
 function buildMistakesTable() {
   const tbody = document.getElementById('mistakesTableBody');
   if (!tbody) return;
   tbody.innerHTML = '';
-  
-  allMistakes.forEach((m, i) => {
-    const severity = m.avg_cp_loss >= 300 
-      ? '<span class="badge bg-danger">Severe</span>' 
-      : m.avg_cp_loss >= 180 
-        ? '<span class="badge bg-warning">High</span>' 
+
+  if (!mistakesView || mistakesView.length === 0) {
+    const row = document.createElement('tr');
+    row.innerHTML = '<td colspan="6" class="text-muted p-3">No mistakes match your filters.</td>';
+    tbody.appendChild(row);
+    return;
+  }
+
+  mistakesView.forEach((m, i) => {
+    const severity = m.avg_cp_loss >= 300
+      ? '<span class="badge bg-danger">Severe</span>'
+      : m.avg_cp_loss >= 180
+        ? '<span class="badge bg-warning">High</span>'
         : '<span class="badge bg-info">Moderate</span>';
-    
-    // Get user move in SAN format
-    let userMoveSan = m.user_move;
+
+    const colorBadge = m.color === 'black'
+      ? '<span class="badge bg-secondary">Black</span>'
+      : '<span class="badge bg-secondary">White</span>';
+
+    let userMoveLabel = m.user_move;
     try {
-      const tempGame = new Chess(m.fen);
-      // User move is what they played FROM this position, we need the previous position
-      // Actually, m.user_move is the bad move made. Let's display it nicely
-      userMoveSan = m.user_move.slice(0, 2) + '-' + m.user_move.slice(2, 4);
-    } catch(e) {}
-    
+      userMoveLabel = m.user_move.slice(0, 2) + '-' + m.user_move.slice(2, 4);
+    } catch {}
+
     const row = document.createElement('tr');
     row.style.cursor = 'pointer';
+    row.setAttribute('data-idx', String(i));
     row.onclick = () => showPosition(i);
     row.innerHTML = `
       <td><strong>${i + 1}</strong></td>
       <td>${m.pair_count || 1}</td>
       <td><strong style="color: ${m.avg_cp_loss >= 300 ? 'var(--danger)' : m.avg_cp_loss >= 180 ? 'var(--warning)' : 'var(--success)'}">${m.avg_cp_loss}</strong></td>
-      <td><code>${userMoveSan}</code></td>
+      <td><code>${userMoveLabel}</code> ${colorBadge}</td>
       <td>${severity}</td>
       <td>
         <button class="btn btn-outline-primary btn-sm py-0 px-2" onclick="event.stopPropagation(); openLichess(${i})" title="Analyze on Lichess">🔗</button>
+        <button class="btn btn-outline-danger btn-sm py-0 px-2 ms-1" onclick="event.stopPropagation(); deleteMistakeAt(${i})" title="Remove from queue">✅</button>
       </td>
     `;
     tbody.appendChild(row);
@@ -731,39 +1032,148 @@ function buildMistakesTable() {
 }
 
 function openLichess(idx) {
-  const m = allMistakes[idx];
+  const m = mistakesView[idx];
+  if (!m || !m.fen) return;
   const url = `https://lichess.org/analysis/${m.fen.replace(/ /g, '_')}`;
-  window.open(url, '_blank');
+  window.open(url, '_blank', 'noopener');
+}
+
+function deleteMistakeAt(idx) {
+  showPosition(idx);
+  deleteCurrentMistake();
+}
+
+function toggleQuizMode() {
+  const next = { ...settings, quizMode: !settings.quizMode };
+  saveSettings(next);
+  updateModeUI();
+  rebuildView({ keepCurrent: false, resetQuizState: true });
+}
+
+async function deleteCurrentMistake() {
+  const m = getCurrentMistake();
+  if (!m || !m.color || !Number.isInteger(m.source_index)) {
+    toast('Cannot delete: missing source index for this mistake.', 'danger');
+    return;
+  }
+
+  const ok = window.confirm('Remove this mistake from your queue?');
+  if (!ok) return;
+
+  try {
+    const resp = await fetch(`/delete_mistake/${m.color}/${m.source_index}`, { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok || !data || data.error) {
+      toast(data && data.error ? data.error : 'Failed to delete mistake.', 'danger');
+      return;
+    }
+
+    // Remove from local arrays and reindex subsequent source_index values for that color.
+    const deletedIndex = m.source_index;
+    const deletedColor = m.color;
+    mistakesAll = mistakesAll
+      .filter((x) => !(x.color === deletedColor && x.source_index === deletedIndex))
+      .map((x) => {
+        if (x.color === deletedColor && Number.isInteger(x.source_index) && x.source_index > deletedIndex) {
+          return { ...x, source_index: x.source_index - 1 };
+        }
+        return x;
+      });
+
+    toast('✅ Removed from your queue.', 'success');
+    rebuildView({ keepCurrent: false, resetQuizState: settings.quizMode });
+  } catch {
+    toast('Failed to delete mistake.', 'danger');
+  }
+}
+
+function applySettingsFromModal() {
+  const next = {
+    ...settings,
+    enableDrag: Boolean(document.getElementById('settingEnableDrag')?.checked),
+    showCoords: Boolean(document.getElementById('settingShowCoords')?.checked),
+    highlightMoves: Boolean(document.getElementById('settingHighlightMoves')?.checked),
+    autoAdvance: Boolean(document.getElementById('settingAutoAdvance')?.checked),
+    acceptTopN: clampInt(document.getElementById('settingAcceptTopN')?.value, 1, 5, DEFAULT_SETTINGS.acceptTopN),
+    minCp: clampInt(document.getElementById('settingMinCp')?.value, 0, 9999, DEFAULT_SETTINGS.minCp),
+    minFreq: clampInt(document.getElementById('settingMinFreq')?.value, 1, 9999, DEFAULT_SETTINGS.minFreq),
+    quizMode: Boolean(document.getElementById('settingQuizMode')?.checked),
+    quizShuffle: Boolean(document.getElementById('settingQuizShuffle')?.checked),
+    quizHideBestMoves: Boolean(document.getElementById('settingQuizHideBestMoves')?.checked),
+  };
+
+  const old = settings;
+  saveSettings(next);
+
+  // Recreate board if board-specific settings changed.
+  const boardNeedsReinit = old.enableDrag !== settings.enableDrag || old.showCoords !== settings.showCoords;
+  if (boardNeedsReinit) destroyAndRecreateBoard();
+
+  updateModeUI();
+  rebuildView({ keepCurrent: true, resetQuizState: old.quizMode !== settings.quizMode });
+}
+
+function resetSettingsToDefaults() {
+  saveSettings({ ...DEFAULT_SETTINGS });
+  syncSettingsModal();
+  destroyAndRecreateBoard();
+  updateModeUI();
+  rebuildView({ keepCurrent: false, resetQuizState: true });
+  toast('Settings reset to defaults.', 'info');
+}
+
+function syncSettingsModal() {
+  const drag = document.getElementById('settingEnableDrag');
+  const coords = document.getElementById('settingShowCoords');
+  const hl = document.getElementById('settingHighlightMoves');
+  const adv = document.getElementById('settingAutoAdvance');
+  const topN = document.getElementById('settingAcceptTopN');
+  const minCp = document.getElementById('settingMinCp');
+  const minFreq = document.getElementById('settingMinFreq');
+  const quizMode = document.getElementById('settingQuizMode');
+  const quizShuffle = document.getElementById('settingQuizShuffle');
+  const quizHide = document.getElementById('settingQuizHideBestMoves');
+
+  if (drag) drag.checked = settings.enableDrag;
+  if (coords) coords.checked = settings.showCoords;
+  if (hl) hl.checked = settings.highlightMoves;
+  if (adv) adv.checked = settings.autoAdvance;
+  if (topN) topN.value = String(settings.acceptTopN);
+  if (minCp) minCp.value = String(settings.minCp);
+  if (minFreq) minFreq.value = String(settings.minFreq);
+  if (quizMode) quizMode.checked = settings.quizMode;
+  if (quizShuffle) quizShuffle.checked = settings.quizShuffle;
+  if (quizHide) quizHide.checked = settings.quizHideBestMoves;
 }
 
 // Initialize
 $(document).ready(function() {
-  console.log('Document ready, initializing...');
-  console.log('Mistakes loaded:', allMistakes ? allMistakes.length : 0);
-  
-  if (document.getElementById('board')) {
-    initBoard();
-    buildMistakesTable();
-    
-    if (allMistakes && allMistakes.length > 0) {
-      showPosition(0);
-    }
+  destroyAndRecreateBoard();
+  updateModeUI();
+  rebuildView({ keepCurrent: false, resetQuizState: true });
+  syncSettingsModal();
 
-    // Click anywhere outside the board to clear selection/hints
-    $(document)
-      .off('click.boardoutside')
-      .on('click.boardoutside', function(e) {
-        if ($(e.target).closest('#board').length) return;
-        clearSelectedSquare();
-        clearHintHighlights();
-      });
-  }
+  document.getElementById('applySettingsBtn')?.addEventListener('click', applySettingsFromModal);
+  document.getElementById('resetSettingsBtn')?.addEventListener('click', resetSettingsToDefaults);
+
+  // Keep modal in sync when opened (Bootstrap triggers this custom event)
+  document.getElementById('settingsModal')?.addEventListener('show.bs.modal', syncSettingsModal);
+
+  // Click anywhere outside the board to clear selection/hints
+  $(document)
+    .off('click.boardoutside')
+    .on('click.boardoutside', function(e) {
+      if ($(e.target).closest('#board').length) return;
+      clearSelectedSquare();
+      clearHintHighlights();
+    });
 });
 
 // Keyboard shortcuts
 $(document).keydown(function(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-  
+  if ($(e.target).closest('.modal').length) return;
+
   switch(e.key) {
     case 'ArrowLeft': prevPosition(); e.preventDefault(); break;
     case 'ArrowRight': nextPosition(); e.preventDefault(); break;
