@@ -1,216 +1,787 @@
 {% extends 'base.html' %}
 {% block content %}
+
+<!-- Chess Board CSS from CDN -->
+<link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+<style>
+  /* Custom board styling */
+  #board {
+    width: 100%;
+    max-width: 520px;
+    margin: 0 auto;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* Improve board appearance */
+  .board-b72b1 {
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+  }
+  
+  /* Better square colors */
+  .white-1e1d7 {
+    background-color: #f0d9b5 !important;
+  }
+  
+  .black-3c85d {
+    background-color: #b58863 !important;
+  }
+  
+  /* Highlight colors */
+  .highlight1-32417, .highlight2-9c5d2 {
+    box-shadow: inset 0 0 3px 3px rgba(56, 189, 248, 0.8) !important;
+  }
+
+  /* Tap-to-move helpers */
+  #board.board-blocked {
+    pointer-events: none;
+  }
+
+  .square-55d63 {
+    position: relative;
+    box-shadow: var(--sq-shadow-1, none), var(--sq-shadow-2, none);
+  }
+
+  .square-55d63.board-square-selected {
+    --sq-shadow-2: inset 0 0 0 4px rgba(56, 189, 248, 0.75);
+  }
+
+  .square-55d63.board-square-lastmove {
+    --sq-shadow-1: inset 0 0 0 4px rgba(245, 158, 11, 0.55);
+  }
+
+  .square-55d63.board-square-hint {
+    --sq-shadow-1: inset 0 0 0 4px rgba(34, 197, 94, 0.55);
+  }
+
+  .square-55d63.board-square-legal::after,
+  .square-55d63.board-square-legal-capture::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    border-radius: 999px;
+    pointer-events: none;
+  }
+
+  .square-55d63.board-square-legal::after {
+    width: 14px;
+    height: 14px;
+    background: rgba(56, 189, 248, 0.35);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
+  }
+
+  .square-55d63.board-square-legal-capture::after {
+    width: 22px;
+    height: 22px;
+    background: transparent;
+    border: 3px solid rgba(56, 189, 248, 0.55);
+   }
+  
+  /* Best moves badge styling */
+  .best-moves-container {
+    background: rgba(15, 23, 42, 0.6);
+    border-radius: 8px;
+    padding: 10px;
+    margin-top: 15px;
+  }
+  
+  .best-move-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(168, 85, 247, 0.2));
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    padding: 4px 12px;
+    border-radius: 20px;
+    margin: 2px;
+    font-family: monospace;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  
+  .best-move-badge:hover {
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.4), rgba(168, 85, 247, 0.4));
+    transform: translateY(-1px);
+  }
+</style>
+
 {% if errors %}
 <div class="alert alert-danger">
+  <strong>⚠️ Errors</strong>
   <ul class="mb-0">
     {% for err in errors %}
-      <li>{{ err }}</li>
+    <li>{{ err }}</li>
     {% endfor %}
   </ul>
 </div>
 {% endif %}
 
 {% if processing %}
-<div class="alert alert-info">Analysis is running. You can reload this page in a bit.</div>
+<div class="alert alert-info">
+  <div class="spinner-border spinner-border-sm me-2"></div>
+  Analysis in progress... Page will refresh when complete.
+  <button class="btn btn-sm btn-outline-info ms-2" onclick="location.reload()">Refresh Now</button>
+</div>
 {% endif %}
 
 {% if not mistakes %}
-  {% if processing %}
-    <p>No results yet.</p>
-  {% else %}
-    <p>No analysis available. Run training first.</p>
-  {% endif %}
+<div class="alert alert-light border text-center p-5">
+  <h1 class="display-4">📊</h1>
+  <h2 class="mt-3">No Analysis to Display</h2>
+  <p class="lead text-muted">
+    This is where your opening mistakes will appear after you upload your games and run an analysis.
+  </p>
+  <hr class="my-4">
+  <p>Ready to get started? Go to the training page to begin.</p>
+  <a href="{{ url_for('train') }}" class="btn btn-primary btn-lg">
+    <i class="fas fa-arrow-right me-2"></i> Go to Training
+  </a>
+</div>
 {% else %}
-<h1>Training Board{% if color %} - {{ color|title }}{% endif %}</h1>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/chessboard.css') }}">
-<script src="{{ url_for('static', filename='js/jquery-3.6.0.min.js') }}"></script>
-<script src="{{ url_for('static', filename='js/chess.min.js') }}"></script>
-<script src="{{ url_for('static', filename='js/chessboard.js') }}"></script>
 
-<div class="row">
-  <div class="col-md-5">
-    <div id="board" style="width:100%;max-width:600px;margin:auto;"></div>
-    <div id="info" class="my-2"></div>
-    <div id="controls" class="mb-3">
-      <button class="btn btn-secondary" onclick="prev()">Previous</button>
-      <button class="btn btn-secondary" onclick="next()">Next</button>
-      <button class="btn btn-danger" onclick="giveUp()">Give Up</button>
+<!-- Header -->
+<div class="card mb-4" style="background: linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 0.9)); border: 1px solid rgba(255,255,255,0.1);">
+  <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-3">
+    <div>
+      <h2 class="mb-1 d-flex align-items-center gap-2">
+        🎯 Opening Trainer{% if color %} · {{ color|title }}{% endif %}
+        <span class="badge bg-success">Ready to Train</span>
+      </h2>
+      <p class="text-muted mb-0">Replay your mistakes and master engine suggestions through active training.</p>
     </div>
-  </div>
-  <div class="col-md-7">
-    <div class="table-responsive" style="max-height:400px;overflow-y:auto;">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Frequency</th>
-          <th>Avg CP Loss</th>
-          <th>Your Move</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="mistake-table">
-        {% for m in mistakes %}
-        <tr id="row-{{ loop.index0 }}">
-          <td>{{ loop.index }}</td>
-          <td>{{ m.pair_count }}</td>
-          <td>{{ m.avg_cp_loss }}</td>
-          <td>{{ m.user_move }}</td>
-          <td>
-            <button class="btn btn-primary btn-sm" onclick="loadMistake({{ loop.index0 }})">Show</button>
-            {% if color %}
-            <button class="btn btn-danger btn-sm" onclick="deleteMistake({{ loop.index0 }})">Delete</button>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="d-flex gap-2 align-items-center">
+      <button class="btn btn-outline-secondary btn-sm" onclick="showStats()">📊 Stats</button>
+      <button class="btn btn-outline-secondary btn-sm" onclick="showSettings()">⚙️ Settings</button>
+      <div class="text-end ms-3">
+        <div class="badge bg-primary">≥ {{ threshold_cp or 100 }} cp</div>
+        <div class="text-muted small">Depth: {{ opening_plies_limit or 20 }} plies</div>
+      </div>
     </div>
   </div>
 </div>
+
+<!-- Main Content -->
+<div class="row g-4">
+  <!-- Board Section -->
+  <div class="col-lg-6">
+    <div class="card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.1);">
+      <div class="card-body">
+        <!-- Board Container -->
+        <div id="board" style="width: 100%;"></div>
+        <div class="d-flex justify-content-between align-items-center mt-2">
+          <div id="boardStatus" class="text-muted small">Click/tap a piece, then click/tap a target square.</div>
+          <div class="text-muted small d-none d-md-block"><kbd>H</kbd> hint · <kbd>R</kbd> reset · <kbd>Esc</kbd> clear</div>
+        </div>
+        
+        <!-- Best Moves Display -->
+        <div class="best-moves-container">
+          <div class="text-muted small mb-2">👑 Best Moves (Click to Preview)</div>
+          <div id="bestMovesDisplay"></div>
+        </div>
+        
+        <!-- Navigation -->
+        <div class="btn-group w-100 mt-3" role="group">
+          <button type="button" class="btn btn-outline-secondary" id="btnFirst" onclick="firstPosition()" title="First (Home)">⏮</button>
+          <button type="button" class="btn btn-outline-secondary" id="btnPrev" onclick="prevPosition()" title="Previous (←)">◀</button>
+          <button type="button" class="btn btn-outline-secondary flex-grow-1" disabled>
+            <span id="posCounter">Position 1</span>
+          </button>
+          <button type="button" class="btn btn-outline-secondary" id="btnNext" onclick="nextPosition()" title="Next (→)">▶</button>
+          <button type="button" class="btn btn-outline-secondary" id="btnLast" onclick="lastPosition()" title="Last (End)">⏭</button>
+        </div>
+        
+        <!-- Controls -->
+        <div class="row g-2 mt-3">
+          <div class="col-6">
+            <button class="btn btn-outline-secondary w-100 btn-sm" onclick="flipBoardFunc()">🔄 Flip</button>
+          </div>
+          <div class="col-6">
+            <button class="btn btn-outline-secondary w-100 btn-sm" onclick="copyFEN()">📋 FEN</button>
+          </div>
+          <div class="col-6">
+            <button class="btn btn-outline-primary w-100 btn-sm" onclick="showHint()" title="Hint (H)">💡 Hint</button>
+          </div>
+          <div class="col-6">
+            <button class="btn btn-outline-secondary w-100 btn-sm" onclick="resetPosition()" title="Reset (R)">↩ Reset</button>
+          </div>
+          <div class="col-12">
+            <a id="lichessLink" class="btn btn-outline-secondary w-100 btn-sm" href="#" target="_blank" rel="noopener">🔗 Analyze current position</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mistakes List Section -->
+  <div class="col-lg-6">
+    <div class="card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.1);">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">📋 Mistake List <span class="badge bg-primary">{{ mistakes|length }}</span></h5>
+        <div>
+          <button class="btn btn-outline-secondary btn-sm" onclick="exportMistakes()">📤 Export</button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="printMistakes()">🖨️ Print</button>
+        </div>
+      </div>
+      <div class="card-body p-0" style="max-height: 550px; overflow-y: auto;">
+        <table class="table table-sm table-hover table-striped mb-0" style="background: transparent;">
+          <thead style="position: sticky; top: 0; background: rgba(15, 23, 42, 0.95); z-index: 10;">
+            <tr>
+              <th style="width: 40px;">#</th>
+              <th>FREQ</th>
+              <th>CP</th>
+              <th>MOVE</th>
+              <th>SEVERITY</th>
+              <th>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody id="mistakesTableBody">
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+
 <script>
-const mistakes = {{ mistakes|tojson }};
-const color = {{ color|tojson }};
-let index = 0;
+// Global state
+const allMistakes = {{ mistakes|tojson }};
+let currentIndex = 0;
 let board = null;
 let game = null;
+let flipped = false;
+let boardOrientation = '{{ "black" if color == "black" else "white" }}';
+let selectedSquare = null;
+let suppressInputUntil = 0;
+let hintTimer = null;
 
-function removeGreySquares() {
-  $('#board .square-55d63').css('background', '');
+const SQUARE_CLASS = 'square-55d63';
+
+function getCurrentMistake() {
+  return allMistakes[currentIndex];
 }
 
-function greySquare(square) {
-  const $square = $('#board .square-' + square);
-  let background = '#a9a9a9';
-  if ($square.hasClass('black-3c85d')) background = '#696969';
-  $square.css('background', background);
+function suppressInputFor(ms, opts = {}) {
+  const { blockPointerEvents = false } = opts;
+  suppressInputUntil = Math.max(suppressInputUntil, Date.now() + ms);
+  if (!blockPointerEvents) return;
+
+  const el = document.getElementById('board');
+  if (!el) return;
+  el.classList.add('board-blocked');
+  setTimeout(() => {
+    if (Date.now() >= suppressInputUntil) el.classList.remove('board-blocked');
+  }, ms + 50);
 }
 
-function onDragStart(source, piece) {
+function isInteractionSuppressed() {
+  return Date.now() < suppressInputUntil;
+}
+
+function squareFromElement(el) {
+  for (const cls of el.classList) {
+    if (/^square-[a-h][1-8]$/.test(cls)) return cls.replace('square-', '');
+  }
+  return null;
+}
+
+function clearSquareClasses(classNames) {
+  if (!classNames || classNames.length === 0) return;
+  $('#board .' + SQUARE_CLASS).removeClass(classNames.join(' '));
+}
+
+function highlightSquare(square, className) {
+  if (!square) return;
+  $('#board .square-' + square).addClass(className);
+}
+
+function clearSelectionHighlights() {
+  clearSquareClasses(['board-square-selected', 'board-square-legal', 'board-square-legal-capture']);
+}
+
+function clearHintHighlights() {
+  clearSquareClasses(['board-square-hint']);
+  if (hintTimer) {
+    clearTimeout(hintTimer);
+    hintTimer = null;
+  }
+}
+
+function clearLastMoveHighlights() {
+  clearSquareClasses(['board-square-lastmove']);
+}
+
+function clearAllHighlights() {
+  clearSelectionHighlights();
+  clearHintHighlights();
+  clearLastMoveHighlights();
+}
+
+function setSelectedSquare(square) {
+  if (!game) return;
+  clearSelectionHighlights();
+  selectedSquare = square;
+
+  highlightSquare(square, 'board-square-selected');
+
+  const moves = game.moves({ square, verbose: true });
+  moves.forEach((m) => {
+    highlightSquare(m.to, m.captured ? 'board-square-legal-capture' : 'board-square-legal');
+  });
+}
+
+function clearSelectedSquare() {
+  selectedSquare = null;
+  clearSelectionHighlights();
+}
+
+function updateBoardMeta(m) {
+  const statusEl = document.getElementById('boardStatus');
+  if (statusEl && game) {
+    const toMove = game.turn() === 'w' ? 'White' : 'Black';
+    const yourColor = (m && m.color) ? (m.color === 'white' ? 'White' : 'Black') : null;
+    const base = yourColor ? `Your move (${yourColor}). Side to move: ${toMove}.` : `Side to move: ${toMove}.`;
+    statusEl.textContent = `${base} Click/tap to move.`;
+  }
+
+  const lichessEl = document.getElementById('lichessLink');
+  if (lichessEl && game) {
+    lichessEl.href = `https://lichess.org/analysis/${game.fen().replace(/ /g, '_')}`;
+  }
+}
+
+function isCorrectTrainingMove(move) {
+  const m = getCurrentMistake();
+  if (!m || !m.top_moves) return true;
+
+  const moveUci = (move.from + move.to + (move.promotion || '')).toLowerCase();
+  const base = moveUci.slice(0, 4);
+  return m.top_moves.some((topMove) => (topMove || '').toLowerCase().startsWith(base));
+}
+
+function handleCorrectMove(move) {
+  clearLastMoveHighlights();
+  highlightSquare(move.from, 'board-square-lastmove');
+  highlightSquare(move.to, 'board-square-lastmove');
+
+  updateBoardMeta(getCurrentMistake());
+  showToast('✅ Correct! Well done!', 'success');
+  suppressInputFor(1000);
+  setTimeout(() => nextPosition(), 900);
+}
+
+function handleWrongMove() {
+  clearLastMoveHighlights();
+  clearSelectedSquare();
+  showToast('❌ Not the best move. Try again!', 'warning');
+}
+
+function attemptMove(from, to) {
+  if (!game || isInteractionSuppressed()) return;
+
+  clearHintHighlights();
+  const move = game.move({ from, to, promotion: 'q' });
+  if (!move) {
+    showToast('Illegal move.', 'warning');
+    return;
+  }
+
+  if (!isCorrectTrainingMove(move)) {
+    game.undo();
+    board.position(game.fen(), true);
+    handleWrongMove();
+    return;
+  }
+
+  board.position(game.fen(), true);
+  clearSelectedSquare();
+  handleCorrectMove(move);
+}
+
+// Initialize chessboard
+function initBoard() {
+  console.log('Initializing board...');
+  
+  game = new Chess();
+  
+  const config = {
+    position: 'start',
+    orientation: boardOrientation,
+    draggable: false,
+    pieceTheme: '/assets/img/chesspieces/wikipedia/{piece}.png',
+    onDragStart: onDragStart,
+    onDrop: onDrop,
+    onSnapEnd: onSnapEnd
+  };
+  
+  board = Chessboard('board', config);
+
+  // Tap-to-move (works great on mobile too)
+  $('#board')
+    .off('click.boardtap')
+    .on('click.boardtap', '.' + SQUARE_CLASS, function() {
+      if (!game || isInteractionSuppressed()) return;
+      const square = squareFromElement(this);
+      if (!square) return;
+
+      // If a drag just happened, ignore the click.
+      if (Date.now() < suppressInputUntil) return;
+
+      const piece = game.get(square);
+
+      if (!selectedSquare) {
+        if (!piece) return;
+        if (piece.color !== game.turn()) return;
+        setSelectedSquare(square);
+        return;
+      }
+
+      if (square === selectedSquare) {
+        clearSelectedSquare();
+        return;
+      }
+
+      if (piece && piece.color === game.turn()) {
+        setSelectedSquare(square);
+        return;
+      }
+
+      attemptMove(selectedSquare, square);
+    });
+  
+  // Make board responsive
+  $(window).on('resize', function() {
+    if (board) board.resize();
+  });
+  
+  console.log('Board initialized:', board);
+}
+
+function onDragStart(source, piece, position, orientation) {
+  if (isInteractionSuppressed()) return false;
+
+  // Don't allow moves if game is over
   if (game.game_over()) return false;
+  
+  // Only allow dragging pieces of the side to move
   if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
-      (game.turn() === 'b' && piece.search(/^w/) !== -1)) return false;
+      (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+    return false;
+  }
+
+  suppressInputFor(250);
+  setSelectedSquare(source);
 }
 
 function onDrop(source, target) {
-  removeGreySquares();
-  const move = game.move({from: source, to: target, promotion: 'q'});
+  clearSelectedSquare();
+
+  // See if the move is legal
+  const move = game.move({
+    from: source,
+    to: target,
+    promotion: 'q' // Always promote to queen for simplicity
+  });
+  
+  // Illegal move
   if (move === null) return 'snapback';
-  const m = mistakes[index];
-  const uci = move.from + move.to + (move.promotion ? move.promotion : '');
-  if (m.top_moves.includes(uci)) {
-    board.position(game.fen());
-    alert('Good move!');
-  } else {
-    alert('Not a top move. Try again.');
+  
+  // Check if this is a correct move
+  if (!isCorrectTrainingMove(move)) {
     game.undo();
+    handleWrongMove();
     return 'snapback';
   }
-}
 
-function onMouseoverSquare(square, piece) {
-  const moves = game.moves({square: square, verbose: true});
-  if (moves.length === 0) return;
-  greySquare(square);
-  for (let i = 0; i < moves.length; i++) {
-    greySquare(moves[i].to);
-  }
-}
-
-function onMouseoutSquare(square, piece) {
-  removeGreySquares();
+  handleCorrectMove(move);
 }
 
 function onSnapEnd() {
   board.position(game.fen());
+  updateBoardMeta(getCurrentMistake());
 }
 
-function show() {
-  if (!mistakes.length) return;
-  const m = mistakes[index];
+// Show position
+function showPosition(idx) {
+  if (idx < 0 || idx >= allMistakes.length) return;
+  
+  currentIndex = idx;
+  const m = allMistakes[idx];
+
+  clearAllHighlights();
+  
+  // Initialize game with the FEN
   game = new Chess(m.fen);
-  const orientation = game.turn() === 'w' ? 'white' : 'black';
-  board.orientation(orientation);
-  board.position(m.fen, false);
-  document.getElementById('info').innerHTML =
-    `<p>Frequency: ${m.pair_count}</p><p>Your move: ${m.user_move}</p>`;
-  highlightRow();
+  
+  // Update board orientation based on user color (fallback: side to move)
+  const orientation = m.color ? m.color : (game.turn() === 'w' ? 'white' : 'black');
+  if (!flipped) {
+    board.orientation(orientation);
+  }
+  board.position(m.fen, true);
+  
+  // Display best moves
+  displayBestMoves(m);
+  
+  // Update counter
+  document.getElementById('posCounter').textContent = `Position ${idx + 1}`;
+
+  // Navigation button states
+  const btnFirst = document.getElementById('btnFirst');
+  const btnPrev = document.getElementById('btnPrev');
+  const btnNext = document.getElementById('btnNext');
+  const btnLast = document.getElementById('btnLast');
+  if (btnFirst) btnFirst.disabled = idx === 0;
+  if (btnPrev) btnPrev.disabled = idx === 0;
+  if (btnNext) btnNext.disabled = idx === allMistakes.length - 1;
+  if (btnLast) btnLast.disabled = idx === allMistakes.length - 1;
+  
+  // Highlight current row in table
+  document.querySelectorAll('#mistakesTableBody tr').forEach((tr, i) => {
+    tr.classList.toggle('table-active', i === idx);
+  });
+
+  const activeRow = document.querySelector('#mistakesTableBody tr.table-active');
+  if (activeRow) activeRow.scrollIntoView({ block: 'nearest' });
+
+  updateBoardMeta(m);
 }
 
-function prev() { if (index > 0) { index--; show(); } }
-function next() { if (index < mistakes.length - 1) { index++; show(); } }
-
-function giveUp() {
-  const m = mistakes[index];
-  if (!m.top_moves.length) return;
-  const best = m.top_moves[0];
-  const moveObj = {from: best.slice(0,2), to: best.slice(2,4)};
-  if (best.length > 4) moveObj.promotion = best.slice(4);
-  game.move(moveObj);
-  board.position(game.fen());
-  alert('Best move: ' + best);
+function displayBestMoves(m) {
+  const container = document.getElementById('bestMovesDisplay');
+  if (!m.top_moves || m.top_moves.length === 0) {
+    container.innerHTML = '<span class="text-muted">No suggestions available</span>';
+    return;
+  }
+  
+  const moves = m.top_moves.slice(0, 3).map((uci, i) => {
+    const tempGame = new Chess(m.fen);
+    const move = tempGame.move({
+      from: uci.slice(0, 2), 
+      to: uci.slice(2, 4), 
+      promotion: uci[4] || undefined
+    });
+    const san = move ? move.san : uci;
+    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
+    return `<span class="best-move-badge" onclick="previewMove('${uci}')" title="Click to preview">${medal} ${san}</span>`;
+  });
+  
+  container.innerHTML = moves.join('');
 }
 
-function loadMistake(i) {
-  if (i < 0 || i >= mistakes.length) return;
-  index = i;
-  show();
+function previewMove(uci) {
+  if (isInteractionSuppressed()) return;
+  const m = allMistakes[currentIndex];
+  const tempGame = new Chess(m.fen);
+  const move = tempGame.move({
+    from: uci.slice(0, 2),
+    to: uci.slice(2, 4),
+    promotion: uci[4] || undefined
+  });
+  
+  if (move) {
+    clearAllHighlights();
+    highlightSquare(move.from, 'board-square-hint');
+    highlightSquare(move.to, 'board-square-hint');
+
+    suppressInputFor(1600, { blockPointerEvents: true });
+    board.position(tempGame.fen(), true);
+    setTimeout(() => {
+      board.position(m.fen, true);
+      clearHintHighlights();
+    }, 1500);
+  }
 }
 
-function deleteMistake(i) {
-  if (!color) return;
-  if (!confirm('Delete this mistake?')) return;
-  fetch(`/delete_mistake/${color}/${i}`, {method: 'POST'}).then(res => {
-    if (res.ok) {
-      mistakes.splice(i, 1);
-      renderTable();
-      if (index >= mistakes.length) index = mistakes.length - 1;
-      if (index < 0) index = 0;
-      show();
-    }
+// Navigation
+function firstPosition() { showPosition(0); }
+function prevPosition() { showPosition(currentIndex - 1); }
+function nextPosition() { showPosition(currentIndex + 1); }
+function lastPosition() { showPosition(allMistakes.length - 1); }
+
+// Controls
+function flipBoardFunc() {
+  flipped = !flipped;
+  board.flip();
+}
+
+function resetPosition() {
+  if (!allMistakes || allMistakes.length === 0) return;
+  showPosition(currentIndex);
+  showToast('↩ Position reset.', 'info');
+}
+
+function showHint() {
+  const m = getCurrentMistake();
+  if (!m || !m.top_moves || m.top_moves.length === 0) {
+    showToast('No hint available for this position.', 'info');
+    return;
+  }
+
+  const bestUci = m.top_moves[0];
+  const from = bestUci.slice(0, 2);
+  const to = bestUci.slice(2, 4);
+  const tempGame = new Chess(m.fen);
+  const move = tempGame.move({ from, to, promotion: bestUci[4] || undefined });
+  const label = move ? move.san : bestUci;
+
+  clearHintHighlights();
+  highlightSquare(from, 'board-square-hint');
+  highlightSquare(to, 'board-square-hint');
+  showToast(`💡 Hint: ${label}`, 'info');
+
+  hintTimer = setTimeout(() => {
+    clearHintHighlights();
+  }, 1800);
+}
+
+function copyFEN() {
+  if (!game) return;
+  const fen = game.fen();
+  navigator.clipboard.writeText(fen).then(() => {
+    showToast('📋 FEN copied to clipboard!', 'success');
+  }).catch(() => {
+    // Fallback
+    prompt('Copy FEN:', fen);
   });
 }
 
-function highlightRow() {
-  document.querySelectorAll('#mistake-table tr').forEach(tr => tr.classList.remove('table-primary'));
-  const row = document.getElementById(`row-${index}`);
-  if (row) row.classList.add('table-primary');
+function showStats() {
+  const total = allMistakes.length;
+  const severe = allMistakes.filter(m => m.avg_cp_loss >= 300).length;
+  const high = allMistakes.filter(m => m.avg_cp_loss >= 180 && m.avg_cp_loss < 300).length;
+  const moderate = total - severe - high;
+  
+  alert(`📊 Statistics\n\nTotal Mistakes: ${total}\n🔴 Severe (300+ cp): ${severe}\n🟠 High (180-299 cp): ${high}\n🟢 Moderate (<180 cp): ${moderate}`);
 }
 
-function renderTable() {
-  const tbody = document.getElementById('mistake-table');
+function showSettings() {
+  alert('⚙️ Settings\n\nSettings panel coming soon!\n\nCurrent: Threshold ≥100cp, Depth 20 plies');
+}
+
+function exportMistakes() {
+  const data = JSON.stringify(allMistakes, null, 2);
+  const blob = new Blob([data], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'mistakes.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('📤 Mistakes exported!', 'success');
+}
+
+function printMistakes() {
+  window.print();
+}
+
+function showToast(message, type) {
+  // Simple toast notification
+  const toast = document.createElement('div');
+  toast.className = `alert alert-${type === 'success' ? 'success' : type === 'warning' ? 'warning' : 'info'} position-fixed`;
+  toast.style.cssText = 'top: 80px; right: 20px; z-index: 9999; animation: fadeIn 0.3s;';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2000);
+}
+
+// Build mistakes table
+function buildMistakesTable() {
+  const tbody = document.getElementById('mistakesTableBody');
+  if (!tbody) return;
   tbody.innerHTML = '';
-  mistakes.forEach((m, i) => {
+  
+  allMistakes.forEach((m, i) => {
+    const severity = m.avg_cp_loss >= 300 
+      ? '<span class="badge bg-danger">Severe</span>' 
+      : m.avg_cp_loss >= 180 
+        ? '<span class="badge bg-warning">High</span>' 
+        : '<span class="badge bg-info">Moderate</span>';
+    
+    // Get user move in SAN format
+    let userMoveSan = m.user_move;
+    try {
+      const tempGame = new Chess(m.fen);
+      // User move is what they played FROM this position, we need the previous position
+      // Actually, m.user_move is the bad move made. Let's display it nicely
+      userMoveSan = m.user_move.slice(0, 2) + '-' + m.user_move.slice(2, 4);
+    } catch(e) {}
+    
     const row = document.createElement('tr');
-    row.id = `row-${i}`;
-    const deleteButton = color ? `<button class="btn btn-danger btn-sm" onclick="deleteMistake(${i})">Delete</button>` : '';
-    row.innerHTML = `<td>${i+1}</td>`+
-      `<td>${m.pair_count}</td>`+
-      `<td>${m.avg_cp_loss}</td>`+
-      `<td>${m.user_move}</td>`+
-      `<td><button class="btn btn-primary btn-sm" onclick="loadMistake(${i})">Show</button> `+
-      `${deleteButton}</td>`;
+    row.style.cursor = 'pointer';
+    row.onclick = () => showPosition(i);
+    row.innerHTML = `
+      <td><strong>${i + 1}</strong></td>
+      <td>${m.pair_count || 1}</td>
+      <td><strong style="color: ${m.avg_cp_loss >= 300 ? 'var(--danger)' : m.avg_cp_loss >= 180 ? 'var(--warning)' : 'var(--success)'}">${m.avg_cp_loss}</strong></td>
+      <td><code>${userMoveSan}</code></td>
+      <td>${severity}</td>
+      <td>
+        <button class="btn btn-outline-primary btn-sm py-0 px-2" onclick="event.stopPropagation(); openLichess(${i})" title="Analyze on Lichess">🔗</button>
+      </td>
+    `;
     tbody.appendChild(row);
   });
-  highlightRow();
 }
 
-$(function() {
-  const pieceThemeBase = '{{ url_for('static', filename='img/chesspieces/wikipedia') }}';
-  const config = {
-    draggable: true,
-    pieceTheme: `${pieceThemeBase}/{piece}.png`,
-    onDragStart: onDragStart,
-    onDrop: onDrop,
-    onMouseoutSquare: onMouseoutSquare,
-    onMouseoverSquare: onMouseoverSquare,
-    onSnapEnd: onSnapEnd
-  };
-  board = ChessBoard('board', config);
-  renderTable();
-  show();
+function openLichess(idx) {
+  const m = allMistakes[idx];
+  const url = `https://lichess.org/analysis/${m.fen.replace(/ /g, '_')}`;
+  window.open(url, '_blank');
+}
+
+// Initialize
+$(document).ready(function() {
+  console.log('Document ready, initializing...');
+  console.log('Mistakes loaded:', allMistakes ? allMistakes.length : 0);
+  
+  if (document.getElementById('board')) {
+    initBoard();
+    buildMistakesTable();
+    
+    if (allMistakes && allMistakes.length > 0) {
+      showPosition(0);
+    }
+
+    // Click anywhere outside the board to clear selection/hints
+    $(document)
+      .off('click.boardoutside')
+      .on('click.boardoutside', function(e) {
+        if ($(e.target).closest('#board').length) return;
+        clearSelectedSquare();
+        clearHintHighlights();
+      });
+  }
+});
+
+// Keyboard shortcuts
+$(document).keydown(function(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  
+  switch(e.key) {
+    case 'ArrowLeft': prevPosition(); e.preventDefault(); break;
+    case 'ArrowRight': nextPosition(); e.preventDefault(); break;
+    case 'Home': firstPosition(); e.preventDefault(); break;
+    case 'End': lastPosition(); e.preventDefault(); break;
+    case 'f': case 'F': flipBoardFunc(); break;
+    case 'h': case 'H': showHint(); break;
+    case 'r': case 'R': resetPosition(); break;
+    case 'c': case 'C': copyFEN(); break;
+    case 'l': case 'L': {
+      if (game) window.open(`https://lichess.org/analysis/${game.fen().replace(/ /g, '_')}`, '_blank');
+      break;
+    }
+    case 'Escape': clearSelectedSquare(); clearHintHighlights(); break;
+  }
 });
 </script>
+
 {% endif %}
+
 {% endblock %}

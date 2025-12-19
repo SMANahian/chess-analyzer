@@ -1,0 +1,102 @@
+/* Chessground Board Customization */
+
+.cg-board-wrap {
+  margin: 0 auto;
+  width: 100%;
+}
+
+.cg-board {
+  background: linear-gradient(135deg, #f0d9b5 0%, #baca44 50%, #b58863 100%);
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.cg-square {
+  box-sizing: border-box;
+}
+
+/* Piece styling */
+.cg-piece {
+  background-size: 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* Highlights */
+.cg-square.move-dest {
+  background-color: rgba(56, 189, 248, 0.3);
+}
+
+.cg-square.move-dest.occupied {
+  background-color: rgba(56, 189, 248, 0.4);
+}
+
+.cg-square.last-move {
+  background-color: rgba(56, 189, 248, 0.15);
+}
+
+.cg-square.selected {
+  background-color: rgba(56, 189, 248, 0.5);
+}
+
+.cg-square.check {
+  background-color: rgba(239, 68, 68, 0.3);
+}
+
+/* Premove */
+.cg-square.premove-dest {
+  background-color: rgba(192, 132, 252, 0.2);
+}
+
+/* Coordinates */
+.cg-coordinate {
+  position: absolute;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.5;
+  z-index: 4;
+}
+
+.cg-coordinate.x {
+  bottom: 4px;
+  right: 4px;
+}
+
+.cg-coordinate.y {
+  top: 4px;
+  left: 4px;
+}
+
+/* Hold piece */
+.cg-hold-piece {
+  display: none;
+  pointer-events: none;
+  z-index: 20;
+  will-change: transform;
+  background-size: 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* Animation */
+.cg-animated {
+  animation: none;
+}
+
+/* Ghost piece */
+.cg-ghost {
+  opacity: 0.3;
+}
+
+/* Dragging */
+.cg-dragging {
+  z-index: 10;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .cg-coordinate {
+    font-size: 10px;
+  }
+}

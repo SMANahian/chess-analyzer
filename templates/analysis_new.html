@@ -1,0 +1,276 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<link rel="stylesheet" href="{{ url_for('static', filename='css/chessboard.css') }}">
+
+{% if errors %}
+<div class="alert alert-danger">
+  <strong>⚠️ Errors</strong>
+  <ul class="mb-0">
+    {% for err in errors %}
+    <li>{{ err }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if processing %}
+<div class="alert alert-info">
+  <div class="spinner-border spinner-border-sm me-2"></div>
+  Analysis in progress... Page will refresh when complete.
+  <button class="btn btn-sm btn-outline-info ms-2" onclick="location.reload()">Refresh Now</button>
+</div>
+{% endif %}
+
+{% if not mistakes %}
+<div class="alert alert-secondary text-center py-5">
+  <h3>📊 No Analysis Available</h3>
+  <p class="mb-0">Upload PGN files and run analysis to see your opening mistakes.</p>
+  <a href="{{ url_for('train') }}" class="btn btn-primary mt-3">Go to Training</a>
+</div>
+{% else %}
+
+<!-- Header -->
+<div class="mb-4">
+  <h2 class="mb-1">🎯 Opening Trainer{% if color %} · {{ color|title }}{% endif %}</h2>
+  <p class="text-muted">Train your openings by replaying mistakes</p>
+</div>
+
+<!-- Main Content -->
+<div class="row g-4">
+  <!-- Board Section -->
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-body">
+        <!-- Board -->
+        <div id="board" style="width: 100%;"></div>
+        
+        <!-- Position Info -->
+        <div id="positionInfo" class="mt-3 p-3 rounded" style="background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border);">
+          <div id="posText" class="text-muted small">Click a mistake to view</div>
+        </div>
+        
+        <!-- Navigation -->
+        <div class="btn-group w-100 mt-3" role="group">
+          <button type="button" class="btn btn-outline-secondary" onclick="firstPosition()">⏮</button>
+          <button type="button" class="btn btn-outline-secondary" onclick="prevPosition()">◀</button>
+          <button type="button" class="btn btn-outline-secondary flex-grow-1" disabled>
+            <span id="posCounter">Position 0</span>
+          </button>
+          <button type="button" class="btn btn-outline-secondary" onclick="nextPosition()">▶</button>
+          <button type="button" class="btn btn-outline-secondary" onclick="lastPosition()">⏭</button>
+        </div>
+        
+        <!-- Controls -->
+        <div class="row g-2 mt-3">
+          <div class="col-6">
+            <button class="btn btn-outline-secondary w-100 btn-sm" onclick="flipBoardFunc()">🔄 Flip</button>
+          </div>
+          <div class="col-6">
+            <button class="btn btn-outline-secondary w-100 btn-sm" onclick="copyFEN()">📋 FEN</button>
+          </div>
+          <div class="col-6">
+            <button class="btn btn-outline-secondary w-100 btn-sm" onclick="showHint()">💡 Hint</button>
+          </div>
+          <div class="col-6">
+            <a id="lichessLink" href="#" target="_blank" class="btn btn-outline-secondary w-100 btn-sm">🔗 Lichess</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mistakes List Section -->
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header">
+        <h5 class="mb-0">📋 Mistakes <span class="badge bg-primary">{{ mistakes|length }}</span></h5>
+      </div>
+      <div class="card-body" style="max-height: 600px; overflow-y: auto;">
+        <table class="table table-sm table-hover mb-0">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Move</th>
+              <th>CP</th>
+              <th>Freq</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="mistakesTableBody">
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+
+<script src="{{ url_for('static', filename='js/jquery-3.6.0.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chess.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chessboard.js') }}"></script>
+
+<script>
+// Global state
+const allMistakes = {{ mistakes|tojson }};
+let currentIndex = 0;
+let board = null;
+let game = null;
+let flipped = false;
+
+// Initialize chessboard
+function initBoard() {
+  const cfg = {
+    position: 'start',
+    orientation: 'white',
+    draggable: true,
+    dropOffBoard: 'trash',
+    sparePieces: false,
+    pieceTheme: '/assets/img/chesspieces/wikipedia/{piece}.png',
+    onChange: function(oldPos, newPos) {
+      game.reset();
+      for (let square in newPos) {
+        const piece = newPos[square];
+        game.put({type: piece[1].toLowerCase(), color: piece[0]}, square);
+      }
+    },
+    onDrop: function(source, target) {
+      const move = game.move({from: source, to: target, promotion: 'q'});
+      if (move === null) return 'snapback';
+      
+      const m = allMistakes[currentIndex];
+      if (m && m.top_moves && m.top_moves.includes(move.from + move.to + (move.promotion || ''))) {
+        // Correct move!
+        setTimeout(() => nextPosition(), 800);
+        return;
+      } else {
+        // Wrong move, undo
+        game.undo();
+        board.position(game.fen());
+        return 'snapback';
+      }
+    }
+  };
+  
+  board = ChessBoard('board', cfg);
+}
+
+// Show position
+function showPosition(idx) {
+  if (idx < 0 || idx >= allMistakes.length) return;
+  
+  currentIndex = idx;
+  const m = allMistakes[idx];
+  
+  // Initialize game
+  game = new Chess(m.fen);
+  
+  // Update board
+  const orientation = game.turn() === 'w' ? 'white' : 'black';
+  board.orientation(orientation);
+  board.position(m.fen, false);
+  
+  // Get best moves
+  const bestMoves = (m.top_moves || []).slice(0, 3).map(uci => {
+    const tempGame = new Chess(m.fen);
+    const move = tempGame.move({from: uci.slice(0,2), to: uci.slice(2,4), promotion: uci[4]});
+    return move ? move.san : uci;
+  }).join(', ');
+  
+  // Update info
+  const severity = m.avg_cp_loss >= 300 ? 'Severe' : m.avg_cp_loss >= 180 ? 'High' : 'Moderate';
+  document.getElementById('posText').innerHTML = `
+    <strong>Position ${idx + 1} of ${allMistakes.length}</strong><br>
+    CP Loss: <strong style="color: ${m.avg_cp_loss >= 300 ? 'var(--danger)' : m.avg_cp_loss >= 180 ? 'var(--warning)' : 'var(--success)'}">${m.avg_cp_loss}</strong>
+    (${severity})<br>
+    Frequency: ${m.pair_count}<br>
+    Best Moves: ${bestMoves}
+  `;
+  
+  document.getElementById('posCounter').textContent = `Position ${idx + 1} of ${allMistakes.length}`;
+  document.getElementById('lichessLink').href = `https://lichess.org/analysis/${m.fen.replace(/ /g, '_')}`;
+  
+  // Highlight row
+  $('tbody tr').removeClass('table-active');
+  $(`tbody tr:eq(${idx})`).addClass('table-active');
+}
+
+// Navigation
+function firstPosition() { showPosition(0); }
+function prevPosition() { showPosition(currentIndex - 1); }
+function nextPosition() { showPosition(currentIndex + 1); }
+function lastPosition() { showPosition(allMistakes.length - 1); }
+
+// Controls
+function flipBoardFunc() {
+  flipped = !flipped;
+  board.orientation(flipped ? 'black' : 'white');
+}
+
+function copyFEN() {
+  const fen = game.fen();
+  navigator.clipboard.writeText(fen).then(() => {
+    alert('FEN copied!');
+  });
+}
+
+function showHint() {
+  const m = allMistakes[currentIndex];
+  if (!m || !m.top_moves || m.top_moves.length === 0) {
+    alert('No suggestion available');
+    return;
+  }
+  const uci = m.top_moves[0];
+  const tempGame = new Chess(m.fen);
+  const move = tempGame.move({from: uci.slice(0,2), to: uci.slice(2,4), promotion: uci[4]});
+  alert('Best move: ' + (move ? move.san : uci));
+}
+
+// Build mistakes table
+function buildMistakesTable() {
+  const tbody = document.getElementById('mistakesTableBody');
+  allMistakes.forEach((m, i) => {
+    const severity = m.avg_cp_loss >= 300 ? '<span class="badge bg-danger">Severe</span>' : 
+                     m.avg_cp_loss >= 180 ? '<span class="badge bg-warning">High</span>' : 
+                     '<span class="badge bg-info">Moderate</span>';
+    
+    const tempGame = new Chess(m.fen);
+    const userMove = tempGame.move({from: m.user_move.slice(0,2), to: m.user_move.slice(2,4), promotion: m.user_move[4]});
+    
+    const row = `
+      <tr onclick="showPosition(${i})" style="cursor: pointer;">
+        <td>${i + 1}</td>
+        <td><strong>${userMove ? userMove.san : m.user_move}</strong></td>
+        <td><strong>${m.avg_cp_loss}</strong></td>
+        <td>${m.pair_count}</td>
+        <td>${severity}</td>
+      </tr>
+    `;
+    tbody.innerHTML += row;
+  });
+}
+
+// Initialize
+$(document).ready(function() {
+  initBoard();
+  buildMistakesTable();
+  if (allMistakes.length > 0) {
+    showPosition(0);
+  }
+});
+
+// Keyboard shortcuts
+$(document).keydown(function(e) {
+  if (e.target === document.body) {
+    if (e.key === 'ArrowLeft') prevPosition();
+    if (e.key === 'ArrowRight') nextPosition();
+    if (e.key === 'Home') firstPosition();
+    if (e.key === 'End') lastPosition();
+    if (e.key.toLowerCase() === 'h') showHint();
+    if (e.key.toLowerCase() === 'f') flipBoardFunc();
+  }
+});
+</script>
+
+{% endblock %}
