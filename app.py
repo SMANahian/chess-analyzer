@@ -114,11 +114,13 @@ def load_mistakes(color: str) -> tuple[list[dict[str, Any]], bool, str | None]:
             with analysis_file.open(encoding="utf-8") as handle:
                 data = json.load(handle)
             if isinstance(data, list):
-                filtered = [
-                    {**m, "color": color}
-                    for m in data
-                    if isinstance(m, dict) and m.get("avg_cp_loss", 0) >= MISTAKE_THRESHOLD_CP
-                ]
+                filtered: list[dict[str, Any]] = []
+                for idx, mistake in enumerate(data):
+                    if not isinstance(mistake, dict):
+                        continue
+                    if mistake.get("avg_cp_loss", 0) < MISTAKE_THRESHOLD_CP:
+                        continue
+                    filtered.append({**mistake, "color": color, "source_index": idx})
                 return filtered, False, None
         except (OSError, json.JSONDecodeError):
             return [], False, "Analysis output is corrupted."
@@ -134,6 +136,35 @@ def load_mistakes(color: str) -> tuple[list[dict[str, Any]], bool, str | None]:
     if flag_file.exists():
         return [], True, None
     return [], False, None
+
+
+def get_mastered_file(color: str) -> Path:
+    """Get the mastered mistakes file path for a user + color."""
+    username = session["username"]
+    user_path = get_user_dir()
+    return user_path / f"{username}_{color}_mastered.json"
+
+
+def load_mastered(color: str) -> tuple[list[dict[str, Any]], str | None]:
+    """Load mastered mistakes for a color."""
+    mastered_file = get_mastered_file(color)
+    if not mastered_file.exists():
+        return [], None
+
+    try:
+        with mastered_file.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+        if isinstance(data, list):
+            mastered: list[dict[str, Any]] = []
+            for idx, mistake in enumerate(data):
+                if not isinstance(mistake, dict):
+                    continue
+                mastered.append({**mistake, "color": color, "mastered_index": idx})
+            return mastered, None
+    except (OSError, json.JSONDecodeError):
+        return [], "Mastered mistakes file is corrupted."
+
+    return [], None
 
 
 def start_analysis(color: str) -> bool:
@@ -506,12 +537,13 @@ def analysis_color(color):
 @app.route("/delete_mistake/<color>/<int:index>", methods=["POST"])
 @login_required
 def delete_mistake(color, index):
-    """Delete a specific mistake from analysis."""
+    """Move a specific mistake from analysis into the mastered list."""
     if color not in {"white", "black"}:
         return jsonify({"error": "Invalid color"}), 404
     
     username = session["username"]
     analysis_file = get_user_dir() / f"{username}_{color}_analysis.json"
+    mastered_file = get_mastered_file(color)
     
     if not analysis_file.exists():
         return jsonify({"error": "Analysis file not found"}), 404
@@ -521,14 +553,106 @@ def delete_mistake(color, index):
             mistakes = json.load(f)
     except (OSError, json.JSONDecodeError):
         return jsonify({"error": "Failed to read analysis file"}), 500
+
+    try:
+        if mastered_file.exists():
+            with mastered_file.open(encoding="utf-8") as f:
+                mastered = json.load(f)
+        else:
+            mastered = []
+    except (OSError, json.JSONDecodeError):
+        return jsonify({"error": "Failed to read mastered file"}), 500
+
+    if not isinstance(mistakes, list) or not isinstance(mastered, list):
+        return jsonify({"error": "Invalid analysis/mastered file format"}), 500
     
     if 0 <= index < len(mistakes):
         deleted = mistakes.pop(index)
+        if isinstance(deleted, dict) and "mastered_at" not in deleted:
+            deleted = {
+                **deleted,
+                "mastered_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+            }
+        mastered.append(deleted)
         atomic_write_json(analysis_file, mistakes)
-        logger.info(f"User {username} deleted mistake at index {index} ({color})")
-        return jsonify({"success": True, "remaining": len(mistakes)})
+        atomic_write_json(mastered_file, mastered)
+        logger.info(f"User {username} mastered mistake at index {index} ({color})")
+        return jsonify({"success": True, "remaining": len(mistakes), "mastered": len(mastered)})
     
     return jsonify({"error": "Invalid index"}), 400
+
+
+@app.route("/restore_mistake/<color>/<int:index>", methods=["POST"])
+@login_required
+def restore_mistake(color, index):
+    """Restore a mastered mistake back into the analysis queue."""
+    if color not in {"white", "black"}:
+        return jsonify({"error": "Invalid color"}), 404
+
+    username = session["username"]
+    analysis_file = get_user_dir() / f"{username}_{color}_analysis.json"
+    mastered_file = get_mastered_file(color)
+
+    if not mastered_file.exists():
+        return jsonify({"error": "Mastered file not found"}), 404
+
+    try:
+        with mastered_file.open(encoding="utf-8") as f:
+            mastered = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return jsonify({"error": "Failed to read mastered file"}), 500
+
+    if not isinstance(mastered, list):
+        return jsonify({"error": "Invalid mastered file format"}), 500
+
+    if not (0 <= index < len(mastered)):
+        return jsonify({"error": "Invalid index"}), 400
+
+    restored = mastered.pop(index)
+    if isinstance(restored, dict):
+        restored = {**restored}
+        restored.pop("mastered_at", None)
+
+    try:
+        if analysis_file.exists():
+            with analysis_file.open(encoding="utf-8") as f:
+                mistakes = json.load(f)
+        else:
+            mistakes = []
+    except (OSError, json.JSONDecodeError):
+        return jsonify({"error": "Failed to read analysis file"}), 500
+
+    if not isinstance(mistakes, list):
+        return jsonify({"error": "Invalid analysis file format"}), 500
+
+    mistakes.append(restored)
+    atomic_write_json(analysis_file, mistakes)
+    atomic_write_json(mastered_file, mastered)
+    logger.info(f"User {username} restored mastered mistake at index {index} ({color})")
+    return jsonify({"success": True, "remaining_mastered": len(mastered), "analysis": len(mistakes)})
+
+
+@app.route("/mastered")
+@login_required
+def mastered():
+    """Mastered mistakes view."""
+    mastered_mistakes: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    for color in ["white", "black"]:
+        m, err = load_mastered(color)
+        mastered_mistakes.extend(m)
+        if err:
+            errors.append(f"{color.title()}: {err}")
+
+    # Show newest first (but keep stable mastered_index for restore actions).
+    mastered_mistakes.sort(key=lambda x: x.get("mastered_at") or "", reverse=True)
+
+    return render_template(
+        "mastered.html",
+        mistakes=mastered_mistakes,
+        errors=errors,
+    )
 
 
 # ==============================================================================

@@ -1,0 +1,157 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
+  <div>
+    <h1 class="mb-1">✅ Mastered Mistakes</h1>
+    <p class="subtle mb-0">Mistakes you removed from your training queue. Restore any mistake back to Analysis.</p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-outline-light btn-sm" href="{{ url_for('analysis') }}">📊 Back to Analysis</a>
+  </div>
+</div>
+
+{% if errors %}
+<div class="alert alert-danger">
+  <strong>⚠️ Errors</strong>
+  <ul class="mb-0">
+    {% for err in errors %}
+    <li>{{ err }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.1);">
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h5 class="mb-0">📚 Mastered List <span id="masteredCount" class="badge bg-primary">{{ mistakes|length }}</span></h5>
+    <div class="text-muted small">Restore mistakes if you want to train them again.</div>
+  </div>
+  <div class="card-body p-0" style="max-height: 650px; overflow-y: auto;">
+    <table class="table table-sm table-hover table-striped mb-0" style="background: transparent;">
+      <thead style="position: sticky; top: 0; background: rgba(15, 23, 42, 0.95); z-index: 10;">
+        <tr>
+          <th style="width: 40px;">#</th>
+          <th>COLOR</th>
+          <th>FREQ</th>
+          <th>CP</th>
+          <th>MOVE</th>
+          <th>MASTERED</th>
+          <th style="width: 140px;">ACTIONS</th>
+        </tr>
+      </thead>
+      <tbody id="masteredTableBody">
+        {% if mistakes %}
+          {% for m in mistakes %}
+          <tr data-color="{{ m.color }}" data-mastered-index="{{ m.mastered_index }}">
+            <td><strong>{{ loop.index }}</strong></td>
+            <td>
+              {% if m.color == 'black' %}
+                <span class="badge bg-secondary">Black</span>
+              {% else %}
+                <span class="badge bg-secondary">White</span>
+              {% endif %}
+            </td>
+            <td>{{ m.pair_count or 1 }}</td>
+            <td>
+              <strong style="color: {{ 'var(--danger)' if (m.avg_cp_loss or 0) >= 300 else 'var(--warning)' if (m.avg_cp_loss or 0) >= 180 else 'var(--success)' }}">
+                {{ m.avg_cp_loss or 0 }}
+              </strong>
+            </td>
+            <td><code>{{ m.user_move }}</code></td>
+            <td class="text-muted small">{{ m.mastered_at or '' }}</td>
+            <td class="d-flex gap-2">
+              <button
+                type="button"
+                class="btn btn-outline-success btn-sm py-0 px-2"
+                data-action="restore"
+                data-color="{{ m.color }}"
+                data-index="{{ m.mastered_index }}"
+                title="Restore to analysis queue"
+              >
+                ↩
+              </button>
+              {% if m.fen %}
+              <a
+                class="btn btn-outline-primary btn-sm py-0 px-2"
+                href="https://lichess.org/analysis/{{ m.fen|replace(' ', '_') }}"
+                target="_blank"
+                rel="noopener"
+                title="Analyze on Lichess"
+              >
+                🔗
+              </a>
+              {% else %}
+              <span class="text-muted small">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="7" class="text-muted p-3">No mastered mistakes yet.</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+async function restoreMastered(color, index) {
+  const ok = window.confirm('Restore this mistake back to your analysis queue?');
+  if (!ok) return;
+
+  try {
+    const resp = await fetch(`/restore_mistake/${color}/${index}`, { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok || !data || data.error) {
+      showToast(data && data.error ? data.error : 'Failed to restore mistake.', 'danger');
+      return;
+    }
+
+    showToast('↩ Restored to your queue.', 'success');
+
+    const tbody = document.getElementById('masteredTableBody');
+    const row = tbody?.querySelector(`tr[data-color="${color}"][data-mastered-index="${index}"]`);
+    if (row) row.remove();
+
+    // Reindex rows for this color after removal.
+    tbody?.querySelectorAll(`tr[data-color="${color}"]`).forEach((tr) => {
+      const current = Number(tr.getAttribute('data-mastered-index'));
+      if (Number.isFinite(current) && current > index) {
+        const next = String(current - 1);
+        tr.setAttribute('data-mastered-index', next);
+        const btn = tr.querySelector('button[data-action="restore"]');
+        if (btn) btn.setAttribute('data-index', next);
+      }
+    });
+
+    const countEl = document.getElementById('masteredCount');
+    if (countEl) countEl.textContent = String(Math.max(0, Number(countEl.textContent || '0') - 1));
+
+    if (tbody && tbody.querySelectorAll('tr[data-color]').length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-muted p-3">No mastered mistakes yet.</td></tr>';
+    }
+  } catch {
+    showToast('Failed to restore mistake.', 'danger');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const tbody = document.getElementById('masteredTableBody');
+  if (!tbody) return;
+
+  tbody.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action="restore"]');
+    if (!btn) return;
+    const color = btn.getAttribute('data-color');
+    const index = Number(btn.getAttribute('data-index'));
+    if (!color || !Number.isInteger(index)) return;
+    restoreMastered(color, index);
+  });
+});
+</script>
+
+{% endblock %}
+

@@ -187,7 +187,7 @@
                     </a>
                 </li>
                 <li class="nav-item dropdown mx-1">
-                    <a class="nav-link dropdown-toggle {{ 'active' if 'analysis' in (request.endpoint or '') }}" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <a class="nav-link dropdown-toggle {{ 'active' if ('analysis' in (request.endpoint or '') or request.endpoint == 'mastered') }}" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                         📊 Analysis
                     </a>
                     <ul class="dropdown-menu">
@@ -195,6 +195,8 @@
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="{{ url_for('analysis_color', color='white') }}">⬜ White</a></li>
                         <li><a class="dropdown-item" href="{{ url_for('analysis_color', color='black') }}">⬛ Black</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="{{ url_for('mastered') }}">✅ Mastered Mistakes</a></li>
                     </ul>
                 </li>
             </ul>
