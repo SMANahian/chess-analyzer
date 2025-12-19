@@ -1,65 +1,83 @@
+"""Chess Analyzer - Flask Application.
+
+A web application for analyzing chess opening mistakes using Stockfish engine.
+"""
 from __future__ import annotations
 
-import io
 import json
+import logging
 import os
-import platform
-import re
-import secrets
-import shutil
-import sys
-import tempfile
-import threading
+from datetime import datetime, timedelta
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
-import chess
-import chess.engine
-import chess.pgn
-from flask import Flask, abort, redirect, render_template, render_template_string, request, session, url_for
+from flask import (
+    Flask,
+    abort,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 from werkzeug.security import check_password_hash, generate_password_hash
 
-BASE_DIR = Path(__file__).resolve().parent
-DATABASE_DIR = Path(os.environ.get("DATABASE_DIR", BASE_DIR / "database"))
-USERS_FILE = DATABASE_DIR / "users.json"
+from config import (
+    ANALYSIS_DEPTH,
+    DATABASE_DIR,
+    MAX_FILE_SIZE_MB,
+    MAX_GAMES_PER_UPLOAD,
+    MIN_PAIR_OCCURRENCES,
+    MISTAKE_THRESHOLD_CP,
+    OPENING_PLIES_LIMIT,
+    Config,
+)
+from utils.analysis import analyze_async, clean_and_merge_pgns, compute_analysis_stats
+from utils.database import atomic_write_json, load_users, save_users
+from utils.stockfish import bundled_stockfish_note, get_engine_status, stockfish_install_hint
+from utils.validation import validate_email, validate_password, validate_username
 
-ANALYSIS_DEPTH = int(os.environ.get("ANALYSIS_DEPTH", "14"))
-MULTIPV = int(os.environ.get("MULTIPV", "5"))
-OPENING_PLIES_LIMIT = int(os.environ.get("OPENING_PLIES_LIMIT", "20"))
-MAX_GAMES_PER_UPLOAD = int(os.environ.get("MAX_GAMES_PER_UPLOAD", "1000"))
-MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "2"))
-MAX_REQUEST_SIZE_MB = int(os.environ.get("MAX_REQUEST_SIZE_MB", str(MAX_FILE_SIZE_MB * 2)))
-MISTAKE_THRESHOLD_CP = int(os.environ.get("MISTAKE_THRESHOLD_CP", "100"))
-TOP_MOVE_THRESHOLD_CP = int(os.environ.get("TOP_MOVE_THRESHOLD_CP", "30"))
-MIN_PAIR_OCCURRENCES = int(os.environ.get("MIN_PAIR_OCCURRENCES", "2"))
-MATE_SCORE_CP = int(os.environ.get("MATE_SCORE_CP", "10000"))
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
-USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,31}$")
-
+# Initialize Flask app
 app = Flask(__name__, static_folder="assets", static_url_path="/assets")
-app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_SIZE_MB * 1024 * 1024
+app.config.from_object(Config)
 
-if os.environ.get("SECRET_KEY"):
-    app.secret_key = os.environ["SECRET_KEY"]
-else:
-    app.secret_key = secrets.token_hex(32)
-
-
-def validate_username(username: str) -> str | None:
-    username = username.strip()
-    if not USERNAME_RE.fullmatch(username):
-        return None
-    return username
+# Ensure sessions are permanent by default
+@app.before_request
+def make_session_permanent():
+    session.permanent = True
+    app.permanent_session_lifetime = timedelta(hours=24)
 
 
-def require_login() -> None:
-    if "username" not in session:
+# ==============================================================================
+# Decorators & Helpers
+# ==============================================================================
+
+def login_required(f):
+    """Decorator to require authentication for a route."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if "username" not in session:
+            flash("Please log in to access this page.", "warning")
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def get_user_dir(username: str | None = None) -> Path:
+    """Get the data directory for a user."""
+    candidate = username or session.get("username")
+    if not candidate:
         abort(401)
-
-
-def user_dir(username: str | None = None) -> Path:
-    require_login()
-    candidate = username or session["username"]
     validated = validate_username(candidate)
     if not validated:
         session.clear()
@@ -67,573 +85,40 @@ def user_dir(username: str | None = None) -> Path:
     return DATABASE_DIR / validated
 
 
-def atomic_write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", delete=False, dir=path.parent, encoding="utf-8") as handle:
-        json.dump(payload, handle)
-        tmp_name = handle.name
-    os.replace(tmp_name, path)
-
-
-def load_users() -> dict[str, dict[str, str]]:
-    if not USERS_FILE.exists():
-        return {}
-    try:
-        with USERS_FILE.open(encoding="utf-8") as handle:
-            data = json.load(handle)
-            if isinstance(data, dict):
-                return data
-    except (OSError, json.JSONDecodeError):
-        pass
-    return {}
-
-
-def save_users(users: dict[str, dict[str, str]]) -> None:
-    atomic_write_json(USERS_FILE, users)
-
-
-def binary_kind(path: Path) -> str | None:
-    try:
-        with path.open("rb") as handle:
-            magic = handle.read(4)
-    except OSError:
-        return None
-
-    if magic == b"\x7fELF":
-        return "ELF"
-    if magic[:2] == b"MZ":
-        return "PE"
-    if magic in {
-        b"\xfe\xed\xfa\xce",
-        b"\xce\xfa\xed\xfe",
-        b"\xfe\xed\xfa\xcf",
-        b"\xcf\xfa\xed\xfe",
-        b"\xca\xfe\xba\xbe",
-        b"\xbe\xba\xfe\xca",
-    }:
-        return "Mach-O"
-    return None
-
-
-def bundled_stockfish_note() -> str | None:
-    candidates = [BASE_DIR / "stockfish", BASE_DIR / "stockfish" / "stockfish", BASE_DIR / "stockfish.exe"]
-    for candidate in candidates:
-        if not candidate.exists():
-            continue
-        kind = binary_kind(candidate)
-        if kind == "ELF":
-            return "Bundled ./stockfish is a Linux (ELF) binary and won't run on macOS/Windows."
-        if kind == "Mach-O":
-            return "Bundled ./stockfish is a macOS (Mach-O) binary."
-        if kind == "PE":
-            return "Bundled ./stockfish.exe is a Windows binary."
-        return "Bundled Stockfish binary exists but format is unknown."
-    return None
-
-
-def stockfish_install_hint() -> tuple[str | None, str | None]:
-    if sys.platform == "darwin":
-        return "Install via Homebrew:", "brew install stockfish"
-    if sys.platform.startswith("linux"):
-        return "Install via apt (Ubuntu/Debian):", "sudo apt-get install stockfish"
-    if sys.platform.startswith("win"):
-        return "Download Stockfish:", "https://stockfishchess.org/download/"
-    system = platform.system()
-    if system:
-        return f"Install Stockfish for {system}:", "https://stockfishchess.org/download/"
-    return None, None
-
-
-def stockfish_candidates() -> list[str]:
-    env_path = os.environ.get("STOCKFISH_PATH")
-    if env_path:
-        return [env_path]
-
-    candidates: list[str] = []
-    for candidate in (BASE_DIR / "stockfish", BASE_DIR / "stockfish" / "stockfish", BASE_DIR / "stockfish.exe"):
-        if candidate.exists():
-            candidates.append(str(candidate))
-
-    system_stockfish = shutil.which("stockfish")
-    if system_stockfish:
-        candidates.append(system_stockfish)
-
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for candidate in candidates:
-        if candidate not in seen:
-            seen.add(candidate)
-            deduped.append(candidate)
-    return deduped or ["stockfish"]
-
-
-def start_stockfish() -> tuple[chess.engine.SimpleEngine, str]:
-    last_exc: Exception | None = None
-    candidates = stockfish_candidates()
-    for candidate in candidates:
-        try:
-            engine = chess.engine.SimpleEngine.popen_uci(candidate)
-        except (OSError, chess.engine.EngineError) as exc:
-            last_exc = exc
-            continue
-        return engine, candidate
-
-    display_candidates: list[str] = []
-    for candidate in candidates:
-        try:
-            path = Path(candidate).resolve()
-        except OSError:
-            display_candidates.append(candidate)
-            continue
-        try:
-            rel = path.relative_to(BASE_DIR)
-        except ValueError:
-            display_candidates.append(candidate)
-        else:
-            display_candidates.append(f"./{rel}")
-
-    raise RuntimeError(
-        "Unable to start Stockfish. "
-        f"Tried: {', '.join(display_candidates)}."
-    ) from last_exc
-
-
-def configure_engine(engine: chess.engine.SimpleEngine) -> None:
-    options: dict[str, Any] = {}
-    threads = os.environ.get("STOCKFISH_THREADS")
-    hash_mb = os.environ.get("STOCKFISH_HASH_MB")
-    if threads:
-        try:
-            options["Threads"] = max(1, int(threads))
-        except ValueError:
-            pass
-    if hash_mb:
-        try:
-            options["Hash"] = max(16, int(hash_mb))
-        except ValueError:
-            pass
-    if options:
-        try:
-            engine.configure(options)
-        except chess.engine.EngineError:
-            pass
-
-
-_ENGINE_STATUS: tuple[bool, str] | None = None
-_ENGINE_STATUS_LOCK = threading.Lock()
-
-
-def get_engine_status() -> tuple[bool, str]:
-    global _ENGINE_STATUS
-    with _ENGINE_STATUS_LOCK:
-        if _ENGINE_STATUS is not None and _ENGINE_STATUS[0]:
-            return _ENGINE_STATUS
-        try:
-            engine, path = start_stockfish()
-        except RuntimeError as exc:
-            return False, str(exc)
-
-        try:
-            engine.quit()
-        except chess.engine.EngineError:
-            pass
-
-        _ENGINE_STATUS = (True, f"Stockfish: {path}")
-        return _ENGINE_STATUS
-
-
-def clean_and_merge_pgns(files: list[Any], dest_path: Path) -> int:
-    total_games = 0
-    total_size = 0
-
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
-    with dest_path.open("w", encoding="utf-8") as out:
-        for fs in files:
-            data_bytes = fs.read()
-            total_size += len(data_bytes)
-            if total_size > MAX_FILE_SIZE_MB * 1024 * 1024:
-                break
-            data = data_bytes.decode("utf-8", "ignore")
-            pgn_io = io.StringIO(data)
-
-            while total_games < MAX_GAMES_PER_UPLOAD:
-                game = chess.pgn.read_game(pgn_io)
-                if game is None:
-                    break
-                new_game = chess.pgn.Game()
-                node = new_game
-                for ply_index, move in enumerate(game.mainline_moves()):
-                    if ply_index >= OPENING_PLIES_LIMIT:
-                        break
-                    node = node.add_variation(move)
-
-                exporter = chess.pgn.StringExporter(headers=True, variations=False, comments=False)
-                out.write(new_game.accept(exporter))
-                out.write("\n\n")
-                total_games += 1
-
-            if total_games >= MAX_GAMES_PER_UPLOAD:
-                break
-    return total_games
-
-
-def position_key(board: chess.Board) -> str:
-    ep = chess.square_name(board.ep_square) if board.ep_square is not None else "-"
-    return f"{board.board_fen()} {'w' if board.turn else 'b'} {board.castling_xfen()} {ep}"
-
-
-def score_to_cp(score: chess.engine.PovScore | None) -> int | None:
-    if score is None:
-        return None
-    value = score.white().score(mate_score=MATE_SCORE_CP)
-    if value is None:
-        return None
-    return int(value)
-
-
-def collect_move_pairs(paths: list[str], color: str) -> tuple[dict[tuple[str, str], int], dict[tuple[str, str], str]]:
-    pair_counts: dict[tuple[str, str], int] = {}
-    pair_fens: dict[tuple[str, str], str] = {}
-
-    target_turn = chess.WHITE if color == "white" else chess.BLACK
-    for path in paths:
-        pgn_path = Path(path)
-        if not pgn_path.exists():
-            continue
-        with pgn_path.open(encoding="utf-8", errors="ignore") as pgn:
-            while True:
-                game = chess.pgn.read_game(pgn)
-                if game is None:
-                    break
-                board = game.board()
-                for ply_index, move in enumerate(game.mainline_moves()):
-                    if ply_index >= OPENING_PLIES_LIMIT:
-                        break
-                    if board.turn != target_turn:
-                        board.push(move)
-                        continue
-                    key = (position_key(board), move.uci())
-                    pair_counts[key] = pair_counts.get(key, 0) + 1
-                    pair_fens.setdefault(key, board.fen())
-                    board.push(move)
-
-    return pair_counts, pair_fens
-
-
-def analyze_pgn(paths: list[str], color: str) -> list[dict[str, Any]]:
-    pair_counts, pair_fens = collect_move_pairs(paths, color)
-    candidates = [(key, count) for key, count in pair_counts.items() if count >= MIN_PAIR_OCCURRENCES]
-    if not candidates:
-        return []
-
-    candidates.sort(key=lambda item: item[1], reverse=True)
-
-    mistakes: list[dict[str, Any]] = []
-    position_cache: dict[str, tuple[int | None, list[str]]] = {}
-    after_cache: dict[str, int | None] = {}
-    depth_limit = chess.engine.Limit(depth=ANALYSIS_DEPTH)
-
-    engine, _stockfish_path = start_stockfish()
-
-    try:
-        configure_engine(engine)
-        for (pos_key, user_move), count in candidates:
-            fen = pair_fens.get((pos_key, user_move))
-            if not fen:
-                continue
-            try:
-                board = chess.Board(fen)
-            except ValueError:
-                continue
-
-            if pos_key not in position_cache:
-                try:
-                    infos = engine.analyse(board, depth_limit, multipv=MULTIPV)
-                except chess.engine.EngineError:
-                    position_cache[pos_key] = (None, [])
-                else:
-                    if isinstance(infos, dict):
-                        infos = [infos]
-                    best_score = score_to_cp(infos[0].get("score"))
-                    top_moves: list[str] = []
-                    if best_score is not None:
-                        for info in infos:
-                            pv = info.get("pv") or []
-                            if not pv:
-                                continue
-                            mv = pv[0]
-                            mv_score = score_to_cp(info.get("score"))
-                            if mv_score is None:
-                                continue
-                            if best_score - mv_score <= TOP_MOVE_THRESHOLD_CP:
-                                top_moves.append(mv.uci())
-                    position_cache[pos_key] = (best_score, top_moves)
-
-            best_score, top_moves = position_cache[pos_key]
-            if best_score is None:
-                continue
-
-            try:
-                move_obj = chess.Move.from_uci(user_move)
-            except ValueError:
-                continue
-            if move_obj not in board.legal_moves:
-                continue
-
-            if top_moves and user_move in top_moves:
-                continue
-
-            board_after = board.copy(stack=False)
-            board_after.push(move_obj)
-            after_key = position_key(board_after)
-            if after_key not in after_cache:
-                try:
-                    info_after = engine.analyse(board_after, depth_limit)
-                except chess.engine.EngineError:
-                    after_cache[after_key] = None
-                else:
-                    after_cache[after_key] = score_to_cp(info_after.get("score"))
-
-            score_after = after_cache.get(after_key)
-            if score_after is None:
-                continue
-
-            mover_is_white = board.turn == chess.WHITE
-            cp_loss = (best_score - score_after) if mover_is_white else (score_after - best_score)
-            if cp_loss <= MISTAKE_THRESHOLD_CP:
-                continue
-
-            mistakes.append(
-                {
-                    "fen": fen,
-                    "user_move": user_move,
-                    "top_moves": top_moves,
-                    "avg_cp_loss": int(round(cp_loss)),
-                    "pair_count": count,
-                }
-            )
-    finally:
-        try:
-            engine.quit()
-        except chess.engine.EngineError:
-            pass
-
-    mistakes.sort(key=lambda item: (item["pair_count"], item["avg_cp_loss"]), reverse=True)
-    return mistakes
-
-
-def analyze_async(paths: list[str], analysis_file: Path, flag_file: Path, error_file: Path, color: str) -> None:
-    def task() -> None:
-        try:
-            mistakes = analyze_pgn(paths, color)
-            atomic_write_json(analysis_file, mistakes)
-        except Exception as exc:
-            atomic_write_json(error_file, {"error": str(exc)})
-        finally:
-            try:
-                flag_file.unlink(missing_ok=True)
-            except OSError:
-                pass
-
-    threading.Thread(target=task, daemon=True).start()
-
-
-@app.route('/')
-def home():
-    if 'username' in session:
-        return redirect(url_for("upload"))
-    return render_template_string(
-        """{% extends 'base.html' %}{% block content %}
-<h1>Welcome to Chess Analyzer</h1>
-<p>Use <a href='https://www.openingtree.com/' target='_blank'>OpeningTree</a> to create your PGN files and then upload them here.</p>
-<p>This project was created by vibecoding with ChatGPT Codex.</p>
-{% endblock %}"""
-    )
-
-
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    if request.method == 'POST':
-        username_raw = request.form["username"]
-        username = validate_username(username_raw)
-        email = request.form["email"].strip()
-        password = request.form["password"]
-        users = load_users()
-        if not username:
-            return render_template("register.html", error="Username must be 2-32 chars (letters/numbers/._-).")
-        if username in users:
-            return render_template('register.html', error='Username already exists')
-        users[username] = {
-            'email': email,
-            'password': generate_password_hash(password)
-        }
-        save_users(users)
-        session["username"] = username
-        session["email"] = email
-        user_dir(username).mkdir(parents=True, exist_ok=True)
-        return redirect(url_for("upload"))
-    return render_template('register.html')
-
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username_raw = request.form["username"]
-        username = validate_username(username_raw)
-        password = request.form["password"]
-        users = load_users()
-        user = users.get(username or "")
-        if user and check_password_hash(user['password'], password):
-            session["username"] = username
-            session["email"] = user["email"]
-            user_dir(username).mkdir(parents=True, exist_ok=True)
-            return redirect(url_for("upload"))
-        return render_template('login.html', error='Invalid credentials')
-    return render_template('login.html')
-
-
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for("login"))
-
-
-@app.route('/upload', methods=['GET', 'POST'])
-def upload():
-    if 'username' not in session:
-        return redirect(url_for("login"))
-    if request.method == 'POST':
-        white_files = request.files.getlist("white_pgn")
-        black_files = request.files.getlist("black_pgn")
-        valid_white = [f for f in white_files if f and f.filename and f.filename.lower().endswith(".pgn")]
-        valid_black = [f for f in black_files if f and f.filename and f.filename.lower().endswith(".pgn")]
-        if not valid_white and not valid_black:
-            return render_template(
-                "upload.html",
-                username=session.get("username"),
-                error="Please provide at least one .pgn file.",
-            )
-        username = session["username"]
-
-        if valid_white:
-            dest = user_dir() / f"{username}_white.pgn"
-            clean_and_merge_pgns(valid_white, dest)
-            (user_dir() / f"{username}_white_analysis.json").unlink(missing_ok=True)
-            (user_dir() / "analysis_white.processing").unlink(missing_ok=True)
-            (user_dir() / "analysis_white.error.json").unlink(missing_ok=True)
-
-        if valid_black:
-            dest = user_dir() / f"{username}_black.pgn"
-            clean_and_merge_pgns(valid_black, dest)
-            (user_dir() / f"{username}_black_analysis.json").unlink(missing_ok=True)
-            (user_dir() / "analysis_black.processing").unlink(missing_ok=True)
-            (user_dir() / "analysis_black.error.json").unlink(missing_ok=True)
-
-        return redirect(url_for("train"))
-    return render_template('upload.html', username=session.get('username'), error=None)
-
-
-@app.route('/clear_pgns', methods=['POST'])
-def clear_pgns():
-    if 'username' not in session:
-        return redirect(url_for("login"))
-    username = session["username"]
-    files = [
-        f"{username}_white.pgn",
-        f"{username}_black.pgn",
-        f"{username}_white_analysis.json",
-        f"{username}_black_analysis.json",
-        "analysis_white.processing",
-        "analysis_black.processing",
-        "analysis_white.error.json",
-        "analysis_black.error.json",
-    ]
-    for name in files:
-        try:
-            (user_dir() / name).unlink(missing_ok=True)
-        except OSError:
-            pass
-    return redirect(url_for("upload"))
-
-
-@app.route('/train')
-def train():
-    if 'username' not in session:
-        return redirect(url_for("login"))
-    engine_ok, engine_status = get_engine_status()
-    install_label, install_value = stockfish_install_hint()
-    bundled_note = bundled_stockfish_note()
-    return render_template(
-        "train.html",
-        engine_ok=engine_ok,
-        engine_status=engine_status,
-        engine_install_label=install_label,
-        engine_install_value=install_value,
-        bundled_stockfish_note=bundled_note,
-        analysis_depth=ANALYSIS_DEPTH,
-        opening_plies_limit=OPENING_PLIES_LIMIT,
-        min_pair_occurrences=MIN_PAIR_OCCURRENCES,
-        mistake_threshold_cp=MISTAKE_THRESHOLD_CP,
-    )
-
-
-def start_analysis(color):
-    engine_ok, _engine_status = get_engine_status()
-    if not engine_ok:
-        return False
-
-    username = session["username"]
-    pgn_file = user_dir() / f"{username}_{color}.pgn"
-    if not pgn_file.exists():
-        return False
-
-    analysis_file = user_dir() / f"{username}_{color}_analysis.json"
-    flag_file = user_dir() / f"analysis_{color}.processing"
-    error_file = user_dir() / f"analysis_{color}.error.json"
-
-    if flag_file.exists():
-        return True
-    try:
-        flag_file.write_text("", encoding="utf-8")
-    except OSError:
-        return False
-
-    error_file.unlink(missing_ok=True)
-    analyze_async([str(pgn_file)], analysis_file, flag_file, error_file, color)
-    return True
-
-
-@app.route('/train_<color>', methods=['POST'])
-def train_color(color):
-    if 'username' not in session:
-        return redirect(url_for("login"))
-    if color not in {"white", "black", "both"}:
-        abort(404)
-    if color == "both":
-        username = session["username"]
-        started = False
-        if (user_dir() / f"{username}_white.pgn").exists():
-            started = start_analysis("white") or started
-        if (user_dir() / f"{username}_black.pgn").exists():
-            started = start_analysis("black") or started
-        return redirect(url_for("analysis" if started else "train"))
-    if start_analysis(color):
-        return redirect(url_for("analysis_color", color=color))
-    return redirect(url_for("train"))
+def get_analysis_status(username: str, color: str) -> dict[str, Any]:
+    """Get the current analysis status for a color."""
+    user_path = DATABASE_DIR / username
+    analysis_file = user_path / f"{username}_{color}_analysis.json"
+    flag_file = user_path / f"analysis_{color}.processing"
+    error_file = user_path / f"analysis_{color}.error.json"
+    pgn_file = user_path / f"{username}_{color}.pgn"
+    
+    return {
+        "has_pgn": pgn_file.exists(),
+        "is_processing": flag_file.exists(),
+        "has_results": analysis_file.exists(),
+        "has_error": error_file.exists(),
+    }
 
 
 def load_mistakes(color: str) -> tuple[list[dict[str, Any]], bool, str | None]:
+    """Load mistake analysis results for a color."""
     username = session["username"]
-    analysis_file = user_dir() / f"{username}_{color}_analysis.json"
-    flag_file = user_dir() / f"analysis_{color}.processing"
-    error_file = user_dir() / f"analysis_{color}.error.json"
+    user_path = get_user_dir()
+    analysis_file = user_path / f"{username}_{color}_analysis.json"
+    flag_file = user_path / f"analysis_{color}.processing"
+    error_file = user_path / f"analysis_{color}.error.json"
 
     if analysis_file.exists():
         try:
             with analysis_file.open(encoding="utf-8") as handle:
                 data = json.load(handle)
             if isinstance(data, list):
-                filtered = [m for m in data if isinstance(m, dict) and m.get("avg_cp_loss", 0) >= MISTAKE_THRESHOLD_CP]
+                filtered = [
+                    {**m, "color": color}
+                    for m in data
+                    if isinstance(m, dict) and m.get("avg_cp_loss", 0) >= MISTAKE_THRESHOLD_CP
+                ]
                 return filtered, False, None
         except (OSError, json.JSONDecodeError):
             return [], False, "Analysis output is corrupted."
@@ -651,54 +136,459 @@ def load_mistakes(color: str) -> tuple[list[dict[str, Any]], bool, str | None]:
     return [], False, None
 
 
-@app.route('/analysis')
+def start_analysis(color: str) -> bool:
+    """Start analysis for a specific color."""
+    engine_ok, _engine_status = get_engine_status()
+    if not engine_ok:
+        return False
+
+    username = session["username"]
+    user_path = get_user_dir()
+    pgn_file = user_path / f"{username}_{color}.pgn"
+    if not pgn_file.exists():
+        return False
+
+    analysis_file = user_path / f"{username}_{color}_analysis.json"
+    flag_file = user_path / f"analysis_{color}.processing"
+    error_file = user_path / f"analysis_{color}.error.json"
+
+    if flag_file.exists():
+        return True
+    try:
+        flag_file.write_text("", encoding="utf-8")
+    except OSError:
+        return False
+
+    error_file.unlink(missing_ok=True)
+    analyze_async([str(pgn_file)], analysis_file, flag_file, error_file, color)
+    logger.info(f"Started analysis for {username} ({color})")
+    return True
+
+
+# ==============================================================================
+# Error Handlers
+# ==============================================================================
+
+@app.errorhandler(401)
+def unauthorized(e):
+    """Handle 401 Unauthorized errors."""
+    flash("Please log in to continue.", "warning")
+    return redirect(url_for("login"))
+
+
+@app.errorhandler(404)
+def not_found(e):
+    """Handle 404 Not Found errors."""
+    return render_template("error.html", error_code=404, error_message="Page not found"), 404
+
+
+@app.errorhandler(500)
+def server_error(e):
+    """Handle 500 Internal Server errors."""
+    logger.error(f"Server error: {e}")
+    return render_template("error.html", error_code=500, error_message="Something went wrong"), 500
+
+
+# ==============================================================================
+# Context Processors
+# ==============================================================================
+
+@app.context_processor
+def inject_globals():
+    """Inject global variables into templates."""
+    return {
+        "current_year": datetime.now().year,
+        "app_name": "Chess Analyzer",
+    }
+
+
+# ==============================================================================
+# Routes - Authentication
+# ==============================================================================
+
+@app.route("/")
+def home():
+    """Landing page."""
+    if "username" in session:
+        return redirect(url_for("upload"))
+    return render_template("home.html")
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    """User registration."""
+    if "username" in session:
+        return redirect(url_for("upload"))
+        
+    if request.method == "POST":
+        username_raw = request.form.get("username", "")
+        username = validate_username(username_raw)
+        email = request.form.get("email", "").strip()
+        password = request.form.get("password", "")
+        
+        # Validate username
+        if not username:
+            flash("Username must be 2-32 characters (letters, numbers, ._-).", "danger")
+            return render_template("register.html")
+        
+        # Validate email
+        email_valid, email_error = validate_email(email)
+        if not email_valid:
+            flash(email_error, "danger")
+            return render_template("register.html")
+        
+        # Validate password
+        password_valid, password_error = validate_password(password)
+        if not password_valid:
+            flash(password_error, "danger")
+            return render_template("register.html")
+        
+        # Check if user exists
+        users = load_users()
+        if username in users:
+            flash("Username already exists. Please choose another.", "danger")
+            return render_template("register.html")
+        
+        # Create user
+        users[username] = {
+            "email": email,
+            "password": generate_password_hash(password),
+            "created_at": datetime.now().isoformat(),
+        }
+        save_users(users)
+        
+        # Log in user
+        session["username"] = username
+        session["email"] = email
+        session.permanent = True
+        (DATABASE_DIR / username).mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"New user registered: {username}")
+        flash("Account created successfully! Welcome to Chess Analyzer.", "success")
+        return redirect(url_for("upload"))
+    
+    return render_template("register.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """User login."""
+    if "username" in session:
+        return redirect(url_for("upload"))
+        
+    if request.method == "POST":
+        username_raw = request.form.get("username", "")
+        username = validate_username(username_raw)
+        password = request.form.get("password", "")
+        
+        users = load_users()
+        user = users.get(username or "")
+        
+        if user and check_password_hash(user["password"], password):
+            session["username"] = username
+            session["email"] = user.get("email", "")
+            session.permanent = True
+            (DATABASE_DIR / username).mkdir(parents=True, exist_ok=True)
+            
+            logger.info(f"User logged in: {username}")
+            flash(f"Welcome back, {username}!", "success")
+            return redirect(url_for("upload"))
+        
+        flash("Invalid username or password.", "danger")
+    
+    return render_template("login.html")
+
+
+@app.route("/logout")
+def logout():
+    """User logout."""
+    username = session.get("username")
+    session.clear()
+    if username:
+        logger.info(f"User logged out: {username}")
+    flash("You have been logged out.", "info")
+    return redirect(url_for("login"))
+
+
+# ==============================================================================
+# Routes - Main Features
+# ==============================================================================
+
+@app.route("/upload", methods=["GET", "POST"])
+@login_required
+def upload():
+    """Upload PGN files."""
+    if request.method == "POST":
+        white_files = request.files.getlist("white_pgn")
+        black_files = request.files.getlist("black_pgn")
+        valid_white = [f for f in white_files if f and f.filename and f.filename.lower().endswith(".pgn")]
+        valid_black = [f for f in black_files if f and f.filename and f.filename.lower().endswith(".pgn")]
+        
+        if not valid_white and not valid_black:
+            flash("Please provide at least one .pgn file.", "warning")
+            return redirect(url_for("upload"))
+        
+        username = session["username"]
+        user_path = get_user_dir()
+        games_uploaded = {"white": 0, "black": 0}
+
+        if valid_white:
+            dest = user_path / f"{username}_white.pgn"
+            games_uploaded["white"] = clean_and_merge_pgns(valid_white, dest)
+            (user_path / f"{username}_white_analysis.json").unlink(missing_ok=True)
+            (user_path / "analysis_white.processing").unlink(missing_ok=True)
+            (user_path / "analysis_white.error.json").unlink(missing_ok=True)
+
+        if valid_black:
+            dest = user_path / f"{username}_black.pgn"
+            games_uploaded["black"] = clean_and_merge_pgns(valid_black, dest)
+            (user_path / f"{username}_black_analysis.json").unlink(missing_ok=True)
+            (user_path / "analysis_black.processing").unlink(missing_ok=True)
+            (user_path / "analysis_black.error.json").unlink(missing_ok=True)
+
+        total_games = games_uploaded["white"] + games_uploaded["black"]
+        flash(f"Successfully uploaded {total_games} games!", "success")
+        logger.info(f"User {username} uploaded games: white={games_uploaded['white']}, black={games_uploaded['black']}")
+        return redirect(url_for("train"))
+    
+    # Get current status
+    username = session["username"]
+    white_status = get_analysis_status(username, "white")
+    black_status = get_analysis_status(username, "black")
+    
+    return render_template(
+        "upload.html",
+        username=username,
+        opening_plies_limit=OPENING_PLIES_LIMIT,
+        max_games=MAX_GAMES_PER_UPLOAD,
+        max_file_size_mb=MAX_FILE_SIZE_MB,
+        white_status=white_status,
+        black_status=black_status,
+    )
+
+
+@app.route("/clear_pgns", methods=["POST"])
+@login_required
+def clear_pgns():
+    """Clear all PGN files and analysis for the current user."""
+    username = session["username"]
+    user_path = get_user_dir()
+    files = [
+        f"{username}_white.pgn",
+        f"{username}_black.pgn",
+        f"{username}_white_analysis.json",
+        f"{username}_black_analysis.json",
+        "analysis_white.processing",
+        "analysis_black.processing",
+        "analysis_white.error.json",
+        "analysis_black.error.json",
+    ]
+    for name in files:
+        try:
+            (user_path / name).unlink(missing_ok=True)
+        except OSError:
+            pass
+    
+    flash("All games and analysis cleared.", "info")
+    logger.info(f"User {username} cleared all data")
+    return redirect(url_for("upload"))
+
+
+@app.route("/train")
+@login_required
+def train():
+    """Training dashboard."""
+    engine_ok, engine_status = get_engine_status()
+    install_label, install_value = stockfish_install_hint()
+    bundled_note = bundled_stockfish_note()
+    
+    username = session["username"]
+    white_status = get_analysis_status(username, "white")
+    black_status = get_analysis_status(username, "black")
+    
+    return render_template(
+        "train.html",
+        engine_ok=engine_ok,
+        engine_status=engine_status,
+        engine_install_label=install_label,
+        engine_install_value=install_value,
+        bundled_stockfish_note=bundled_note,
+        analysis_depth=ANALYSIS_DEPTH,
+        opening_plies_limit=OPENING_PLIES_LIMIT,
+        min_pair_occurrences=MIN_PAIR_OCCURRENCES,
+        mistake_threshold_cp=MISTAKE_THRESHOLD_CP,
+        white_status=white_status,
+        black_status=black_status,
+    )
+
+
+@app.route("/train_<color>", methods=["POST"])
+@login_required
+def train_color(color):
+    """Start analysis for a specific color."""
+    if color not in {"white", "black", "both"}:
+        abort(404)
+    
+    username = session["username"]
+    user_path = get_user_dir()
+    
+    if color == "both":
+        started = False
+        if (user_path / f"{username}_white.pgn").exists():
+            started = start_analysis("white") or started
+        if (user_path / f"{username}_black.pgn").exists():
+            started = start_analysis("black") or started
+        
+        if started:
+            flash("Analysis started for both colors. This may take a few minutes.", "info")
+        return redirect(url_for("analysis") if started else url_for("train"))
+    
+    if start_analysis(color):
+        flash(f"Analysis started for {color}. This may take a few minutes.", "info")
+        return redirect(url_for("analysis_color", color=color))
+    
+    flash(f"Could not start analysis for {color}. Make sure you have uploaded PGN files.", "warning")
+    return redirect(url_for("train"))
+
+
+@app.route("/analysis")
+@login_required
 def analysis():
-    if 'username' not in session:
-        return redirect(url_for("login"))
+    """Combined analysis view for both colors."""
     mistakes = []
     processing = False
     errors: list[str] = []
-    for color in ['white', 'black']:
+    
+    for color in ["white", "black"]:
         m, p, err = load_mistakes(color)
         mistakes.extend(m)
         processing = processing or p
         if err:
             errors.append(f"{color.title()}: {err}")
-    return render_template("analysis.html", mistakes=mistakes, processing=processing, color=None, errors=errors)
+    
+    stats = compute_analysis_stats(mistakes)
+    
+    return render_template(
+        "analysis.html",
+        mistakes=mistakes,
+        processing=processing,
+        color=None,
+        errors=errors,
+        stats=stats,
+        threshold_cp=MISTAKE_THRESHOLD_CP,
+        opening_plies_limit=OPENING_PLIES_LIMIT,
+    )
 
 
-@app.route('/analysis_<color>')
+@app.route("/analysis_<color>")
+@login_required
 def analysis_color(color):
-    if 'username' not in session:
-        return redirect(url_for("login"))
+    """Analysis view for a specific color."""
     if color not in {"white", "black"}:
         abort(404)
+    
     mistakes, processing, error = load_mistakes(color)
     errors = [error] if error else []
-    return render_template("analysis.html", mistakes=mistakes, processing=processing, color=color, errors=errors)
+    stats = compute_analysis_stats(mistakes)
+    
+    return render_template(
+        "analysis.html",
+        mistakes=mistakes,
+        processing=processing,
+        color=color,
+        errors=errors,
+        stats=stats,
+        threshold_cp=MISTAKE_THRESHOLD_CP,
+        opening_plies_limit=OPENING_PLIES_LIMIT,
+    )
 
 
-@app.route('/delete_mistake/<color>/<int:index>', methods=['POST'])
+@app.route("/delete_mistake/<color>/<int:index>", methods=["POST"])
+@login_required
 def delete_mistake(color, index):
-    if 'username' not in session:
-        return ('', 403)
+    """Delete a specific mistake from analysis."""
     if color not in {"white", "black"}:
-        return ("", 404)
-    analysis_file = user_dir() / f"{session['username']}_{color}_analysis.json"
+        return jsonify({"error": "Invalid color"}), 404
+    
+    username = session["username"]
+    analysis_file = get_user_dir() / f"{username}_{color}_analysis.json"
+    
     if not analysis_file.exists():
-        return ('', 404)
+        return jsonify({"error": "Analysis file not found"}), 404
+    
     try:
         with analysis_file.open(encoding="utf-8") as f:
             mistakes = json.load(f)
     except (OSError, json.JSONDecodeError):
-        return ("", 500)
+        return jsonify({"error": "Failed to read analysis file"}), 500
+    
     if 0 <= index < len(mistakes):
-        mistakes.pop(index)
+        deleted = mistakes.pop(index)
         atomic_write_json(analysis_file, mistakes)
-    return ('', 204)
+        logger.info(f"User {username} deleted mistake at index {index} ({color})")
+        return jsonify({"success": True, "remaining": len(mistakes)})
+    
+    return jsonify({"error": "Invalid index"}), 400
 
 
-if __name__ == '__main__':
+# ==============================================================================
+# API Endpoints
+# ==============================================================================
+
+@app.route("/api/status")
+@login_required
+def api_status():
+    """Get current analysis status."""
+    username = session["username"]
+    return jsonify({
+        "white": get_analysis_status(username, "white"),
+        "black": get_analysis_status(username, "black"),
+    })
+
+
+@app.route("/api/analysis/<color>")
+@login_required
+def api_analysis(color):
+    """Get analysis results as JSON."""
+    if color not in {"white", "black"}:
+        return jsonify({"error": "Invalid color"}), 404
+    
+    mistakes, processing, error = load_mistakes(color)
+    stats = compute_analysis_stats(mistakes)
+    
+    return jsonify({
+        "mistakes": mistakes,
+        "processing": processing,
+        "error": error,
+        "stats": stats,
+    })
+
+
+@app.route("/api/export")
+@login_required
+def api_export():
+    """Export all analysis data."""
+    mistakes = []
+    for color in ["white", "black"]:
+        m, _, _ = load_mistakes(color)
+        mistakes.extend(m)
+    
+    stats = compute_analysis_stats(mistakes)
+    
+    return jsonify({
+        "username": session["username"],
+        "exported_at": datetime.now().isoformat(),
+        "stats": stats,
+        "mistakes": mistakes,
+    })
+
+
+# ==============================================================================
+# Main Entry Point
+# ==============================================================================
+
+if __name__ == "__main__":
     DATABASE_DIR.mkdir(parents=True, exist_ok=True)
     debug = os.environ.get("FLASK_DEBUG") == "1"
-    app.run(debug=debug, use_reloader=False)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=debug, port=port, use_reloader=False)

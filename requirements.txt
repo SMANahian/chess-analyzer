@@ -1,2 +1,8 @@
+# Core dependencies
 Flask>=2.3
 python-chess>=1.999
+Werkzeug>=2.3
+
+# Security (optional but recommended)
+# flask-wtf>=1.2  # For CSRF protection
+# flask-limiter>=3.0  # For rate limiting
