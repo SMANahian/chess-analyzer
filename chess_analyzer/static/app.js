@@ -125,10 +125,10 @@ function renderEngineBadge() {
   const el = document.getElementById('engine-badge');
   if (!el || !S.status) return;
   if (S.status.engine_ok) {
-    el.innerHTML = `<span class="status-pill status-good">Engine ready${S.status.dev_mode ? ' · dev' : ''}</span>`;
+    el.innerHTML = `<span class="status-pill status-good">♟ Engine ready${S.status.dev_mode ? ' · dev' : ''}</span>`;
     return;
   }
-  el.innerHTML = `<span class="status-pill status-warn" title="${esc(S.status.engine_path)}">Engine missing${S.status.dev_mode ? ' · dev' : ''}</span>`;
+  el.innerHTML = `<span class="status-pill status-warn" title="${esc(S.status.engine_path)}">⚠ Engine missing${S.status.dev_mode ? ' · dev' : ''}</span>`;
 }
 
 function initTheme() {
@@ -171,45 +171,46 @@ function renderGames() {
   const runningSyncs = summary.sync_running || 0;
 
   setApp(`
-    <div class="page-shell dashboard-view">
+    <div class="page-shell">
       <section class="panel hero-panel">
         <div class="hero-copy">
-          <p class="eyebrow">Opening preparation, without spreadsheet pain</p>
-          <h1 class="hero-title">Turn your opening leaks into a deliberate training queue.</h1>
+          <p class="hero-eyebrow">Chess opening preparation</p>
+          <h1 class="hero-title">Find your leaks. Drill them out.</h1>
           <p class="hero-text">
-            Upload PGNs or sync from your platforms, let Stockfish isolate recurring opening mistakes,
-            then drill those exact positions in the browser.
+            Upload PGNs or sync directly from Lichess and Chess.com. Stockfish finds the positions
+            you keep getting wrong — then you drill them until they stick.
           </p>
           <div class="hero-actions">
-            <a href="#/analysis/white" class="btn btn-primary">Review White</a>
-            <a href="#/practice" class="btn btn-secondary">Start Practice</a>
+            <a href="#/analysis/white" class="btn btn-primary">♔ Review White</a>
+            <a href="#/analysis/black" class="btn btn-secondary">♚ Review Black</a>
+            <a href="#/practice" class="btn btn-ghost">⚔ Practice</a>
           </div>
         </div>
         <div class="hero-rail">
           <div class="hero-note">
-            <span class="hero-note-label">Engine</span>
-            <strong>${S.status?.engine_ok ? 'Ready for analysis' : 'Needs Stockfish'}</strong>
-            <span>${S.status?.engine_ok ? esc(S.status.engine_path) : esc(S.status?.engine_hint || '')}</span>
+            <span class="hero-note-label">Stockfish engine</span>
+            <strong>${S.status?.engine_ok ? '✓ Ready for analysis' : '⚠ Stockfish missing'}</strong>
+            <span>${S.status?.engine_ok ? esc(S.status.engine_path) : esc(S.status?.engine_hint || 'brew install stockfish')}</span>
           </div>
           <div class="hero-note">
-            <span class="hero-note-label">Live jobs</span>
-            <strong>${summary.active_jobs || 0}</strong>
-            <span>${runningAnalysis} analysis running · ${runningSyncs} sync running · ${queueCount} queued</span>
+            <span class="hero-note-label">Background jobs</span>
+            <strong>${summary.active_jobs || 0} active</strong>
+            <span>${runningAnalysis} analysis · ${runningSyncs} sync · ${queueCount} queued</span>
           </div>
         </div>
       </section>
 
-      <section class="metric-grid">
-        ${metricCard(summary.total_games || 0, 'Games in library', 'Across both colors')}
-        ${metricCard(summary.total_mistakes || 0, 'Active mistakes', 'Current training queue')}
-        ${metricCard(summary.total_snoozed || 0, 'Snoozed', 'Parked for later review')}
-        ${metricCard(summary.total_mastered || 0, 'Mastered', 'Removed from training')}
+      <div class="metric-grid">
+        ${metricCard(summary.total_games || 0, 'Games', 'In your library')}
+        ${metricCard(summary.total_mistakes || 0, 'Active mistakes', 'Need drilling')}
+        ${metricCard(summary.total_mastered || 0, 'Mastered', 'Positions cleared')}
+        ${metricCard(summary.total_snoozed || 0, 'Snoozed', 'Parked for later')}
         ${metricCard(
-          summary.practice_total ? `${summary.practice_correct}/${summary.practice_total}` : '0',
-          'Practice score',
-          summary.practice_best_streak ? `Best streak ${summary.practice_best_streak}` : 'No sessions yet'
+          summary.practice_total ? `${Math.round((summary.practice_correct/summary.practice_total)*100)}%` : '—',
+          'Practice accuracy',
+          summary.practice_best_streak ? `Best streak: ${summary.practice_best_streak}` : 'No sessions yet'
         )}
-      </section>
+      </div>
 
       ${!S.status?.engine_ok ? `
         <section class="panel warning-banner">
@@ -221,11 +222,11 @@ function renderGames() {
       <section class="panel ops-shell">
         <div class="panel-head">
           <div>
-            <p class="eyebrow">Live operations</p>
-            <h2>Background jobs and partial results</h2>
-            <p class="panel-subtitle">The dashboard updates while sync and analysis keep running.</p>
+            <p class="eyebrow">Background jobs</p>
+            <h2>Live operations</h2>
+            <p class="panel-subtitle">Dashboard auto-refreshes every 10 seconds while jobs run.</p>
           </div>
-          <span class="status-pill">${activeJobs.length} active</span>
+          <span class="status-pill ${activeJobs.length > 0 ? 'status-info' : ''}">${activeJobs.length} active</span>
         </div>
         ${activeJobs.length ? `
           <div class="ops-grid">
@@ -233,8 +234,9 @@ function renderGames() {
           </div>
         ` : `
           <div class="empty-block compact">
-            <h3>No background work right now</h3>
-            <p>Start a sync or analysis run and new progress will appear here immediately.</p>
+            <div class="empty-icon">⏸</div>
+            <h3>No background work running</h3>
+            <p>Start a sync or analysis from one of the color cards above.</p>
           </div>
         `}
       </section>
@@ -258,8 +260,9 @@ function renderGames() {
           </div>
         ` : `
           <div class="empty-block compact">
+            <div class="empty-icon">⚡</div>
             <h3>No sync sources yet</h3>
-            <p>Connect a Lichess or Chess.com username from either color card above. Syncs are incremental and local-only.</p>
+            <p>Connect a Lichess or Chess.com username from either color card above. Syncs are incremental — only new games are fetched each time.</p>
           </div>
         `}
       </section>
@@ -336,28 +339,29 @@ function colorCard(color, info) {
     <section class="panel color-card ${color}">
       <div class="panel-head">
         <div>
-          <p class="eyebrow">${color === 'white' ? 'Build the initiative' : 'Defend the dark squares'}</p>
+          <p class="eyebrow">${color === 'white' ? 'Build the initiative' : 'Defend with precision'}</p>
           <h2>${icon} ${cap} repertoire</h2>
         </div>
         <span class="status-pill">${info.game_count || 0} games</span>
       </div>
 
       <div class="card-topline">
-        <span>${hasGames ? 'PGNs ready for review' : 'No games uploaded yet'}</span>
+        <span>${hasGames ? `${info.game_count} games ready for analysis` : 'Upload or sync games to start'}</span>
         ${statusBadge(info.run_status, info.run_queue_position)}
       </div>
 
       <div class="tab-strip" role="tablist">
-        <button class="tab-btn active" data-tab-group="${color}" data-tab="file">File upload</button>
-        <button class="tab-btn" data-tab-group="${color}" data-tab="lichess">Lichess</button>
-        <button class="tab-btn" data-tab-group="${color}" data-tab="chesscom">Chess.com</button>
+        <button class="tab-btn active" data-tab-group="${color}" data-tab="file">📄 File</button>
+        <button class="tab-btn" data-tab-group="${color}" data-tab="lichess">⚡ Lichess</button>
+        <button class="tab-btn" data-tab-group="${color}" data-tab="chesscom">♟ Chess.com</button>
       </div>
 
       <div id="tab-${color}-file" class="tab-pane">
         <div id="zone-${color}" class="drop-zone">
           <input type="file" id="file-${color}" accept=".pgn" class="hidden" />
-          <div class="drop-zone-title">${hasGames ? 'Replace uploaded PGN' : 'Drop a PGN here'}</div>
-          <p>${hasGames ? 'Drop a new file or click to browse' : 'Upload a focused white or black PGN archive to start analysis.'}</p>
+          <div class="drop-zone-icon">${hasGames ? '🔄' : '📂'}</div>
+          <div class="drop-zone-title">${hasGames ? 'Replace PGN' : 'Drop a PGN file here'}</div>
+          <p>${hasGames ? 'Drop a new file or click to browse' : 'Supports standard PGN files exported from any platform'}</p>
         </div>
       </div>
 
@@ -800,22 +804,24 @@ function buildAnalysisUI() {
             <div class="panel-head compact">
               <div>
                 <p class="eyebrow">Position</p>
-                <h2 id="ctr">0 / 0</h2>
+                <h2 id="ctr" style="font-variant-numeric:tabular-nums">0 / 0</h2>
               </div>
               <div class="board-actions">
-                <button class="btn btn-ghost" id="nav-first">⏮</button>
-                <button class="btn btn-ghost" id="nav-prev">◀</button>
-                <button class="btn btn-ghost" id="nav-next">▶</button>
-                <button class="btn btn-ghost" id="nav-last">⏭</button>
+                <button class="btn-icon" id="nav-first" title="First">⏮</button>
+                <button class="btn-icon" id="nav-prev"  title="Previous (←)">◀</button>
+                <button class="btn-icon" id="nav-next"  title="Next (→)">▶</button>
+                <button class="btn-icon" id="nav-last"  title="Last">⏭</button>
               </div>
             </div>
-            <div class="board-wrap" id="board-wrap"></div>
-            <div class="board-toolbar">
-              <button class="btn btn-secondary" id="btn-hint">Hint</button>
-              <button class="btn btn-ghost" id="btn-flip">Flip</button>
-              <button class="btn btn-ghost" id="btn-copy-fen">Copy FEN</button>
-              <button class="btn btn-ghost" id="btn-lichess">Open in Lichess</button>
-              <button class="btn btn-ghost" id="btn-help">Shortcuts</button>
+            <div class="board-container">
+              <div class="board-wrap" id="board-wrap"></div>
+              <div class="board-toolbar">
+                <button class="btn btn-secondary" id="btn-hint">Hint (H)</button>
+                <button class="btn btn-ghost" id="btn-flip">Flip (F)</button>
+                <button class="btn btn-ghost" id="btn-copy-fen">Copy FEN</button>
+                <button class="btn btn-ghost" id="btn-lichess">Lichess ↗</button>
+                <button class="btn-icon" id="btn-help" title="Keyboard shortcuts (?)">?</button>
+              </div>
             </div>
           </section>
 
@@ -961,17 +967,17 @@ function renderList() {
   list.innerHTML = S.mistakes.map((mistake, index) => {
     const severity = severityData(mistake.avg_cp_loss);
     return `
-      <button class="mistake-row ${index === S.idx ? 'active' : ''}" data-i="${index}">
+      <button class="mistake-row ${severity.rowClass} ${index === S.idx ? 'active' : ''}" data-i="${index}">
         <span class="mistake-rank">${index + 1}</span>
         <div class="mistake-copy">
           <div class="mistake-title-row">
             <strong class="mistake-move">${mistake.user_move}</strong>
             <span class="pill ${severity.pill}">${severity.label}</span>
           </div>
-          <p>${esc(mistake.opening_name || 'Unlabeled opening')} ${mistake.opening_eco ? `· ${esc(mistake.opening_eco)}` : ''}</p>
+          <p>${esc(mistake.opening_name || 'Unknown opening')}${mistake.opening_eco ? ` · ${esc(mistake.opening_eco)}` : ''}</p>
         </div>
         <div class="mistake-metrics">
-          <span class="pill pill-cp">${mistake.avg_cp_loss}cp</span>
+          <span class="pill pill-cp">−${mistake.avg_cp_loss}cp</span>
           <span class="pill pill-freq">${mistake.pair_count}×</span>
         </div>
       </button>
@@ -1031,8 +1037,9 @@ function renderDetail(mistake) {
     <div class="detail-stack">
       <div class="detail-header">
         <div>
-          <p class="eyebrow">Mistake brief</p>
-          <h2>${esc(mistake.user_move)} was repeated ${mistake.pair_count} times</h2>
+          <p class="eyebrow">Position brief</p>
+          <h2 style="font-family:'SFMono-Regular','Menlo',monospace;letter-spacing:-0.01em">${esc(mistake.user_move)}</h2>
+          <p style="color:var(--ink-2);font-size:.88rem;margin-top:4px">Played ${mistake.pair_count} time${mistake.pair_count !== 1 ? 's' : ''} · always suboptimal</p>
         </div>
         <span class="status-pill ${severity.pill}">${severity.label}</span>
       </div>
@@ -1040,43 +1047,44 @@ function renderDetail(mistake) {
       ${mistake.opening_name ? `
         <div class="opening-label">
           ${mistake.opening_eco ? `<span class="opening-eco-chip">${esc(mistake.opening_eco)}</span>` : ''}
-          <span class="opening-name-text">${esc(mistake.opening_name)}</span>
+          <span>${esc(mistake.opening_name)}</span>
         </div>
       ` : ''}
 
       <div class="detail-metric-grid">
         <div class="detail-metric">
-          <span>Played move</span>
-          <strong>${esc(mistake.user_move)}</strong>
+          <span>Your move</span>
+          <strong style="font-family:'SFMono-Regular','Menlo',monospace">${esc(mistake.user_move)}</strong>
         </div>
         <div class="detail-metric">
-          <span>Average loss</span>
-          <strong>${mistake.avg_cp_loss} cp</strong>
+          <span>Avg cp loss</span>
+          <strong style="color:var(--red)">−${mistake.avg_cp_loss}</strong>
         </div>
         <div class="detail-metric">
-          <span>Frequency</span>
-          <strong>${mistake.pair_count} times</strong>
+          <span>Seen</span>
+          <strong>${mistake.pair_count}×</strong>
         </div>
       </div>
 
       <div class="detail-section">
-        <h3>Better candidates</h3>
+        <h3>Better moves</h3>
         ${topMoves.length ? `
           <div class="move-chip-row" id="top-moves">
-            ${topMoves.map((move, index) => `<button class="move-chip ${index === 0 ? 'best' : ''}" data-mv="${move}">${move}</button>`).join('')}
+            ${topMoves.map((move, i) => `<button class="move-chip ${i === 0 ? 'best' : ''}" data-mv="${move}">${i === 0 ? '★ ' : ''}${move}</button>`).join('')}
           </div>
+          <p style="font-size:.8rem;color:var(--ink-2);margin-top:8px">Click a move to see it on the board</p>
         ` : '<p class="detail-copy">No alternative moves were returned for this position.</p>'}
       </div>
 
       <div class="detail-section">
-        <h3>Position FEN</h3>
+        <h3>FEN</h3>
         <p class="fen-block">${esc(mistake.fen)}</p>
       </div>
 
       <div class="detail-actions">
-        <button id="btn-master" class="btn btn-primary">Mark mastered</button>
-        <button id="btn-snooze" class="btn btn-secondary">Snooze for later</button>
-        <button id="btn-hint-detail" class="btn btn-ghost">Toggle hint</button>
+        <button id="btn-master" class="btn btn-primary">✓ Mastered</button>
+        <button id="btn-snooze" class="btn btn-secondary">○ Snooze</button>
+        <button id="btn-hint-detail" class="btn btn-ghost">Hint</button>
       </div>
     </div>
   `;
@@ -1386,15 +1394,18 @@ function buildPracticeUI({ runningNote = '' } = {}) {
       <section class="panel practice-shell">
         <div class="panel-head">
           <div>
-            <p class="eyebrow">Live drilling</p>
-            <h1>Practice the current mistake queue</h1>
+            <p class="eyebrow">Deliberate practice</p>
+            <h1>Drill your opening mistakes</h1>
           </div>
-          <a href="#/analysis/white" class="btn btn-ghost">Back to analysis</a>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span class="status-pill" id="p-streak-badge">Streak: 0</span>
+            <button id="p-end" class="btn btn-danger">End session</button>
+          </div>
         </div>
 
-        <div class="metric-grid compact">
+        <div class="metric-grid compact" style="margin-bottom:0">
           ${metricCard(0, 'Streak', 'Current run')}
-          ${metricCard(0, 'Correct', 'Solved positions')}
+          ${metricCard(0, 'Correct', 'This session')}
           ${metricCard(0, 'Attempted', 'Total tries')}
           ${metricCard(0, 'Best streak', 'Session record')}
         </div>
@@ -1403,17 +1414,25 @@ function buildPracticeUI({ runningNote = '' } = {}) {
 
         <div class="practice-layout">
           <div class="practice-board-card">
-            <div id="p-board-wrap" class="board-wrap-sm"></div>
-            <div class="board-toolbar">
-              <button id="p-hint" class="btn btn-secondary">Hint</button>
-              <button id="p-skip" class="btn btn-ghost">Skip</button>
-              <button id="p-end" class="btn btn-danger">End session</button>
+            <div class="board-container">
+              <div id="p-board-wrap" class="board-wrap-sm"></div>
+              <div class="board-toolbar" style="max-width:440px">
+                <button id="p-hint" class="btn btn-secondary">Hint</button>
+                <button id="p-skip" class="btn btn-ghost">Skip</button>
+              </div>
             </div>
           </div>
           <div class="practice-copy-card">
-            <p class="eyebrow">Prompt</p>
-            <h2 id="p-msg">Find the best move</h2>
-            <p class="muted-copy" id="p-ctr"></p>
+            <div class="prac-info">
+              <p class="eyebrow" style="margin:0">Position</p>
+              <h2 id="p-msg" style="font-size:1.2rem;margin:0">Find the best move</h2>
+              <p class="muted-copy" id="p-ctr" style="font-size:.85rem"></p>
+              <div id="p-opening" class="prac-opening"></div>
+            </div>
+            <div id="p-after" style="display:none;padding:16px;border-radius:var(--radius-sm);background:var(--s2);border:1px solid var(--line)">
+              <p class="eyebrow" style="margin:0 0 8px">Better moves</p>
+              <div id="p-moves" class="move-chip-row"></div>
+            </div>
           </div>
         </div>
       </section>
@@ -1424,6 +1443,8 @@ function buildPracticeUI({ runningNote = '' } = {}) {
   document.getElementById('p-skip').onclick = pracSkip;
   document.getElementById('p-end').onclick = pracEnd;
   updatePracticeStats();
+  const afterPanel = document.getElementById('p-after');
+  if (afterPanel) afterPanel.style.display = 'none';
 }
 
 function loadPracticePosition({ resetAttempts = true, resetMessage = true } = {}) {
@@ -1470,6 +1491,19 @@ function loadPracticePosition({ resetAttempts = true, resetMessage = true } = {}
   updatePracticeStats();
   if (resetMessage) setMsg('Find the best move');
   document.getElementById('p-ctr').textContent = `Position ${P.qIdx + 1} of ${P.queue.length}`;
+  const afterPanel = document.getElementById('p-after');
+  if (afterPanel) afterPanel.style.display = 'none';
+
+  // Show opening context
+  const openingEl = document.getElementById('p-opening');
+  if (openingEl) {
+    const colorBadge = `<span class="prac-color-badge">${mistake.color === 'white' ? '♔' : '♚'}</span>`;
+    if (mistake.opening_name) {
+      openingEl.innerHTML = `${colorBadge} ${esc(mistake.opening_name)}${mistake.opening_eco ? ` <span class="opening-eco-chip">${esc(mistake.opening_eco)}</span>` : ''}`;
+    } else {
+      openingEl.innerHTML = colorBadge;
+    }
+  }
 }
 
 function pracOnMove(orig, dest, mistake) {
@@ -1512,6 +1546,14 @@ function pracHint() {
     },
   });
   setMsg(`Hint: consider ${mistake.top_moves?.[0] || '?'}`);
+  // Show moves panel
+  const afterPanel = document.getElementById('p-after');
+  const movesEl = document.getElementById('p-moves');
+  if (afterPanel && movesEl) {
+    movesEl.innerHTML = (mistake.top_moves || []).slice(0, 3)
+      .map((mv, i) => `<span class="move-chip ${i === 0 ? 'best' : ''}">${i === 0 ? '★ ' : ''}${mv}</span>`).join('');
+    afterPanel.style.display = 'block';
+  }
 }
 
 function pracSkip() {
@@ -1540,21 +1582,35 @@ async function pracEnd() {
   }
 
   const pct = P.total > 0 ? Math.round((P.correct / P.total) * 100) : 0;
+  const headline = pct >= 85 ? 'Excellent run ♟' : pct >= 65 ? 'Solid session' : pct >= 40 ? 'Keep the reps coming' : 'Every rep counts';
   setApp(`
     <div class="page-shell">
       <section class="panel empty-block roomy">
         <p class="eyebrow">Session complete</p>
-        <h1>${pct >= 80 ? 'Excellent run' : pct >= 60 ? 'Solid session' : 'Keep the reps coming'}</h1>
-        <p>You solved ${P.correct} out of ${P.total} positions for ${pct}% accuracy.</p>
-        <div class="metric-grid compact">
-          ${metricCard(P.correct, 'Correct', 'Solved positions')}
-          ${metricCard(P.total, 'Attempted', 'Total tries')}
-          ${metricCard(`${pct}%`, 'Accuracy', 'Session score')}
-          ${metricCard(P.bestStreak, 'Best streak', 'Peak run')}
+        <h1>${headline}</h1>
+        <p style="color:var(--ink-2)">${P.total > 0 ? `${P.correct} of ${P.total} positions solved — ${pct}% accuracy` : 'No positions attempted.'}</p>
+        <div class="result-grid">
+          <div class="result-card">
+            <span class="r-val" style="color:var(--green)">${pct}%</span>
+            <span class="r-lbl">Accuracy</span>
+          </div>
+          <div class="result-card">
+            <span class="r-val">${P.correct}</span>
+            <span class="r-lbl">Correct</span>
+          </div>
+          <div class="result-card">
+            <span class="r-val">${P.total}</span>
+            <span class="r-lbl">Attempted</span>
+          </div>
+          <div class="result-card">
+            <span class="r-val" style="color:var(--gold)">${P.bestStreak}</span>
+            <span class="r-lbl">Best streak</span>
+          </div>
         </div>
         <div class="hero-actions">
-          <button id="p-again" class="btn btn-primary">Practice again</button>
-          <a href="#/analysis/white" class="btn btn-secondary">Open analysis</a>
+          <button id="p-again" class="btn btn-primary">⚔ Practice again</button>
+          <a href="#/analysis/white" class="btn btn-secondary">♔ White analysis</a>
+          <a href="#/analysis/black" class="btn btn-ghost">♚ Black analysis</a>
         </div>
       </section>
     </div>
@@ -1581,6 +1637,11 @@ function updatePracticeStats() {
     cards[1].textContent = P.correct;
     cards[2].textContent = P.total;
     cards[3].textContent = P.bestStreak;
+  }
+  const badge = document.getElementById('p-streak-badge');
+  if (badge) {
+    badge.textContent = `Streak: ${P.streak}`;
+    badge.className = `status-pill${P.streak >= 5 ? ' status-good' : P.streak >= 3 ? ' status-info' : ''}`;
   }
 }
 
@@ -1931,9 +1992,9 @@ function runDescription(status, queuePosition, error, progress = 0, total = 0, r
 }
 
 function severityData(cp) {
-  if (cp >= 300) return { label: 'Blunder', pill: 'pill-blunder' };
-  if (cp >= 150) return { label: 'Mistake', pill: 'pill-mistake' };
-  return { label: 'Inaccuracy', pill: 'pill-inaccuracy' };
+  if (cp >= 300) return { label: 'Blunder',    pill: 'pill-blunder',    rowClass: 'blunder'     };
+  if (cp >= 150) return { label: 'Mistake',    pill: 'pill-mistake',    rowClass: 'mistake-sev' };
+  return           { label: 'Inaccuracy', pill: 'pill-inaccuracy', rowClass: 'inaccuracy'  };
 }
 
 function setApp(html) {
@@ -1978,20 +2039,17 @@ function shuffle(arr) {
 function toast(message, type = '') {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.innerHTML = type === 'success'
-    ? `<span>✓</span> ${esc(message)}`
-    : type === 'error'
-      ? `<span>✕</span> ${esc(message)}`
-      : type === 'info'
-        ? `<span>ℹ</span> ${esc(message)}`
-        : esc(message);
+  const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : type === 'info' ? 'i' : '';
+  el.innerHTML = icon
+    ? `<span class="toast-icon">${icon}</span><span>${esc(message)}</span>`
+    : `<span>${esc(message)}</span>`;
   const container = document.getElementById('toast');
   container.appendChild(el);
   setTimeout(() => {
     el.style.opacity = '0';
-    el.style.transition = 'opacity .25s';
-    setTimeout(() => el.remove(), 250);
-  }, 3200);
+    el.style.transition = 'opacity .28s ease';
+    setTimeout(() => el.remove(), 300);
+  }, 3500);
 }
 
 function esc(value) {
