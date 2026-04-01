@@ -34,6 +34,7 @@ ANALYSIS_MAX_CANDIDATES = int(os.environ.get("ANALYSIS_MAX_CANDIDATES", "250"))
 _ANALYSIS_QUEUE: "queue.Queue[tuple[str, int]]" = queue.Queue()
 _WORKER_LOCK = threading.Lock()
 _WORKER_THREAD: Optional[threading.Thread] = None
+_CURRENT_JOB_DEPTH: int = ANALYSIS_DEPTH  # set per job by _run_analysis_job
 
 
 class AnalysisCancelled(Exception):
@@ -121,30 +122,39 @@ def _score_cp(score: Optional[chess.engine.PovScore]) -> Optional[int]:
     return int(val) if val is not None else None
 
 
-def _collect_pairs(pgn_text: str, color: str) -> tuple[dict, dict, dict]:
-    target   = chess.WHITE if color == "white" else chess.BLACK
-    counts:   dict[tuple[str, str], int]             = {}
-    fens:     dict[tuple[str, str], str]             = {}
-    openings: dict[tuple[str, str], tuple[str, str]] = {}
+def _collect_pairs(pgn_text: str, color: str) -> tuple[dict, dict, dict, dict]:
+    target      = chess.WHITE if color == "white" else chess.BLACK
+    counts:     dict[tuple[str, str], int]             = {}
+    fens:       dict[tuple[str, str], str]             = {}
+    openings:   dict[tuple[str, str], tuple[str, str]] = {}
+    move_lists: dict[tuple[str, str], str]             = {}
     for game in iter_supported_games(pgn_text):
-        g_counts, g_fens, g_openings = _collect_pairs_from_game(game, color)
+        g_counts, g_fens, g_openings, g_move_lists = _collect_pairs_from_game(game, color)
         for key, value in g_counts.items():
             counts[key] = counts.get(key, 0) + value
         fens.update({key: value for key, value in g_fens.items() if key not in fens})
         openings.update({key: value for key, value in g_openings.items() if key not in openings})
-    return counts, fens, openings
+        move_lists.update({key: value for key, value in g_move_lists.items() if key not in move_lists})
+    return counts, fens, openings, move_lists
 
 
 def _collect_pairs_from_game(
     game: chess.pgn.Game,
     color: str,
-) -> tuple[dict[tuple[str, str], int], dict[tuple[str, str], str], dict[tuple[str, str], tuple[str, str]]]:
+) -> tuple[
+    dict[tuple[str, str], int],
+    dict[tuple[str, str], str],
+    dict[tuple[str, str], tuple[str, str]],
+    dict[tuple[str, str], str],
+]:
     target = chess.WHITE if color == "white" else chess.BLACK
-    counts: dict[tuple[str, str], int] = {}
-    fens: dict[tuple[str, str], str] = {}
-    openings: dict[tuple[str, str], tuple[str, str]] = {}
+    counts:     dict[tuple[str, str], int]             = {}
+    fens:       dict[tuple[str, str], str]             = {}
+    openings:   dict[tuple[str, str], tuple[str, str]] = {}
+    move_lists: dict[tuple[str, str], str]             = {}
     board = game.board()
     last_op: Optional[tuple[str, str]] = None
+    played_uci: list[str] = []
     for i, move in enumerate(game.mainline_moves()):
         if i >= OPENING_PLIES:
             break
@@ -159,8 +169,11 @@ def _collect_pairs_from_game(
             fens.setdefault(key, board.fen())
             if last_op and key not in openings:
                 openings[key] = last_op
+            if key not in move_lists:
+                move_lists[key] = " ".join(played_uci)
+        played_uci.append(move.uci())
         board.push(move)
-    return counts, fens, openings
+    return counts, fens, openings, move_lists
 
 
 def analyze(
@@ -173,7 +186,7 @@ def analyze(
 
     progress_cb(done, total) is called every few candidates if provided.
     """
-    counts, fens, openings = _collect_pairs(pgn_text, color)
+    counts, fens, openings, move_lists = _collect_pairs(pgn_text, color)
     candidates = [(k, n) for k, n in counts.items() if n >= MIN_OCCURRENCES]
     if not candidates:
         if progress_cb:
@@ -272,6 +285,7 @@ def analyze(
                 "color":        color,
                 "opening_eco":  op[0] if op else None,
                 "opening_name": op[1] if op else None,
+                "move_list":    move_lists.get((pos_key, user_move)),
             })
 
             if progress_cb and (_done_i + 1) % 5 == 0:
@@ -318,6 +332,16 @@ def _analysis_worker() -> None:
 
 
 def _run_analysis_job(color: str, run_id: int) -> None:
+    global _CURRENT_JOB_DEPTH
+    depth_setting = db.get_setting("analysis_depth")
+    if depth_setting is not None:
+        try:
+            _CURRENT_JOB_DEPTH = max(1, min(30, int(depth_setting)))
+        except (ValueError, TypeError):
+            _CURRENT_JOB_DEPTH = ANALYSIS_DEPTH
+    else:
+        _CURRENT_JOB_DEPTH = ANALYSIS_DEPTH
+
     pgn_row = db.get_pgn(color)
     if not pgn_row:
         db.finish_run(run_id, status="error", error=f"No {color} games uploaded yet")
@@ -347,7 +371,7 @@ def _run_analysis_job(color: str, run_id: int) -> None:
             "processed_games": processed_games,
             "total_games": total_games,
             "batch_size": ANALYSIS_BATCH_GAMES,
-            "depth": ANALYSIS_DEPTH,
+            "depth": _CURRENT_JOB_DEPTH,
             "opening_plies": OPENING_PLIES,
             "batch_position_limit": ANALYSIS_BATCH_POSITION_LIMIT,
         },
@@ -517,29 +541,33 @@ def _process_analysis_batch(
     if db.run_cancel_requested(run_id):
         raise AnalysisCancelled()
 
-    batch_counts: dict[tuple[str, str], int] = {}
-    batch_fens: dict[tuple[str, str], str] = {}
-    batch_openings: dict[tuple[str, str], tuple[str, str]] = {}
+    batch_counts:     dict[tuple[str, str], int]             = {}
+    batch_fens:       dict[tuple[str, str], str]             = {}
+    batch_openings:   dict[tuple[str, str], tuple[str, str]] = {}
+    batch_move_lists: dict[tuple[str, str], str]             = {}
     for game in batch_games:
-        g_counts, g_fens, g_openings = _collect_pairs_from_game(game, color)
+        g_counts, g_fens, g_openings, g_move_lists = _collect_pairs_from_game(game, color)
         for key, count in g_counts.items():
             batch_counts[key] = batch_counts.get(key, 0) + count
         for key, fen in g_fens.items():
             batch_fens.setdefault(key, fen)
         for key, op in g_openings.items():
             batch_openings.setdefault(key, op)
+        for key, ml in g_move_lists.items():
+            batch_move_lists.setdefault(key, ml)
 
     touched_keys = list(batch_counts.keys())
     db.apply_pair_batch(
         color,
         [
             {
-                "pos_key": pos_key,
-                "user_move": user_move,
-                "fen": batch_fens[(pos_key, user_move)],
+                "pos_key":    pos_key,
+                "user_move":  user_move,
+                "fen":        batch_fens[(pos_key, user_move)],
                 "pair_count": count,
-                "opening_eco": batch_openings.get((pos_key, user_move), (None, None))[0],
+                "opening_eco":  batch_openings.get((pos_key, user_move), (None, None))[0],
                 "opening_name": batch_openings.get((pos_key, user_move), (None, None))[1],
+                "move_list":  batch_move_lists.get((pos_key, user_move)),
             }
             for (pos_key, user_move), count in batch_counts.items()
         ],
@@ -631,13 +659,14 @@ def _refresh_pair_state(
     db.upsert_mistake_record(
         color,
         {
-            "fen": fen,
-            "user_move": user_move,
-            "top_moves": top_moves,
-            "avg_cp_loss": int(round(cp_loss)),
-            "pair_count": int(state["pair_count"]),
-            "opening_eco": state.get("opening_eco"),
+            "fen":          fen,
+            "user_move":    user_move,
+            "top_moves":    top_moves,
+            "avg_cp_loss":  int(round(cp_loss)),
+            "pair_count":   int(state["pair_count"]),
+            "opening_eco":  state.get("opening_eco"),
             "opening_name": state.get("opening_name"),
+            "move_list":    state.get("move_list"),
         },
     )
 
@@ -657,7 +686,7 @@ def _get_or_eval_position(
             return cached.get("eval_cp"), cached_top_moves
 
     board = chess.Board(fen)
-    depth = chess.engine.Limit(depth=ANALYSIS_DEPTH)
+    depth = chess.engine.Limit(depth=_CURRENT_JOB_DEPTH)
     if include_top_moves:
         infos = engine.analyse(board, depth, multipv=MULTIPV)
         if isinstance(infos, dict):

@@ -6,14 +6,14 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Generator, Optional
 
 DATA_DIR = Path(os.environ.get("CHESS_ANALYZER_DATA", Path.home() / ".chess-analyzer"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "chess_analyzer.db"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _DB_TIMEOUT_SECONDS = float(os.environ.get("SQLITE_TIMEOUT_SECONDS", "15"))
 _INIT_LOCK = threading.Lock()
 _INITIALIZED_DB_PATH: Optional[Path] = None
@@ -144,6 +144,18 @@ CREATE TABLE IF NOT EXISTS app_logs (
     message    TEXT NOT NULL,
     details    TEXT
 );
+
+CREATE TABLE IF NOT EXISTS mistake_attempts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    mistake_id   INTEGER NOT NULL,
+    correct      INTEGER NOT NULL DEFAULT 0,
+    attempted_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 _MIGRATIONS = [
@@ -156,6 +168,13 @@ _MIGRATIONS = [
     "ALTER TABLE mistakes ADD COLUMN snoozed INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE mistakes ADD COLUMN snoozed_at TEXT",
     "ALTER TABLE sync_runs ADD COLUMN details TEXT",
+    # v4: SM-2 spaced repetition fields + move breadcrumb
+    "ALTER TABLE mistakes ADD COLUMN sm2_interval INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE mistakes ADD COLUMN sm2_ease REAL NOT NULL DEFAULT 2.5",
+    "ALTER TABLE mistakes ADD COLUMN sm2_due_at TEXT",
+    "ALTER TABLE mistakes ADD COLUMN sm2_reps INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE mistakes ADD COLUMN move_list TEXT",
+    "ALTER TABLE analysis_pair_state ADD COLUMN move_list TEXT",
 ]
 
 _INDEXES = [
@@ -168,6 +187,9 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_sync_runs_config_id ON sync_runs(config_id, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_practice_sessions_color_id ON practice_sessions(color, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_app_logs_created_at ON app_logs(id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_mistake_attempts_mistake_id ON mistake_attempts(mistake_id, attempted_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_mistakes_sm2_due ON mistakes(color, mastered, snoozed, sm2_due_at)",
+    "CREATE INDEX IF NOT EXISTS idx_mistakes_color_practice ON mistakes(color, mastered, snoozed, sm2_reps)",
 ]
 
 
@@ -572,13 +594,14 @@ def apply_pair_batch(color: str, items: list[dict[str, Any]]) -> None:
     with get_db() as db:
         db.executemany(
             "INSERT INTO analysis_pair_state "
-            "(color, pos_key, user_move, fen, pair_count, opening_eco, opening_name) "
-            "VALUES (?,?,?,?,?,?,?) "
+            "(color, pos_key, user_move, fen, pair_count, opening_eco, opening_name, move_list) "
+            "VALUES (?,?,?,?,?,?,?,?) "
             "ON CONFLICT(color, pos_key, user_move) DO UPDATE SET "
             "pair_count=analysis_pair_state.pair_count + excluded.pair_count, "
             "fen=excluded.fen, "
             "opening_eco=COALESCE(analysis_pair_state.opening_eco, excluded.opening_eco), "
-            "opening_name=COALESCE(analysis_pair_state.opening_name, excluded.opening_name)",
+            "opening_name=COALESCE(analysis_pair_state.opening_name, excluded.opening_name), "
+            "move_list=COALESCE(analysis_pair_state.move_list, excluded.move_list)",
             [
                 (
                     color,
@@ -588,6 +611,7 @@ def apply_pair_batch(color: str, items: list[dict[str, Any]]) -> None:
                     int(item["pair_count"]),
                     item.get("opening_eco"),
                     item.get("opening_name"),
+                    item.get("move_list"),
                 )
                 for item in items
             ],
@@ -648,8 +672,8 @@ def replace_mistakes(color: str, items: list[dict[str, Any]]) -> None:
         ts = now_iso()
         db.executemany(
             "INSERT INTO mistakes "
-            "(color, fen, user_move, top_moves, avg_cp_loss, pair_count, opening_eco, opening_name, analyzed_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "(color, fen, user_move, top_moves, avg_cp_loss, pair_count, opening_eco, opening_name, move_list, analyzed_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             [
                 (
                     color,
@@ -660,6 +684,7 @@ def replace_mistakes(color: str, items: list[dict[str, Any]]) -> None:
                     int(m["pair_count"]),
                     m.get("opening_eco"),
                     m.get("opening_name"),
+                    m.get("move_list"),
                     ts,
                 )
                 for m in items
@@ -675,7 +700,24 @@ def get_mistakes(color: str) -> list[dict[str, Any]]:
             "ORDER BY pair_count DESC, avg_cp_loss DESC",
             (color,),
         ).fetchall()
-        return [_row_to_mistake(row) for row in rows]
+        mistakes = [_row_to_mistake(row) for row in rows]
+        if mistakes:
+            ids = [m["id"] for m in mistakes]
+            placeholders = ",".join("?" * len(ids))
+            stats_rows = db.execute(
+                f"SELECT mistake_id, COUNT(*) as total, SUM(correct) as correct "
+                f"FROM mistake_attempts WHERE mistake_id IN ({placeholders}) GROUP BY mistake_id",
+                ids,
+            ).fetchall()
+            stats_map = {int(r["mistake_id"]): r for r in stats_rows}
+            for m in mistakes:
+                stats = stats_map.get(m["id"])
+                total = int(stats["total"] or 0) if stats else 0
+                correct = int(stats["correct"] or 0) if stats else 0
+                m["practice_total"] = total
+                m["practice_correct"] = correct
+                m["practice_rate"] = round(correct / total, 2) if total > 0 else None
+        return mistakes
 
 
 def get_mastered(color: str) -> list[dict[str, Any]]:
@@ -776,25 +818,22 @@ def upsert_mistake_record(color: str, item: dict[str, Any]) -> None:
             int(item["pair_count"]),
             item.get("opening_eco"),
             item.get("opening_name"),
+            item.get("move_list"),
             now_iso(),
         )
         if row:
             db.execute(
-                "UPDATE mistakes SET top_moves=?, avg_cp_loss=?, pair_count=?, opening_eco=?, opening_name=?, analyzed_at=? "
+                "UPDATE mistakes SET top_moves=?, avg_cp_loss=?, pair_count=?, opening_eco=?, opening_name=?, "
+                "move_list=COALESCE(move_list, ?), analyzed_at=? "
                 "WHERE id=?",
                 (*payload, row["id"]),
             )
             return
         db.execute(
             "INSERT INTO mistakes "
-            "(color, fen, user_move, top_moves, avg_cp_loss, pair_count, opening_eco, opening_name, analyzed_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-            (
-                color,
-                item["fen"],
-                item["user_move"],
-                *payload,
-            ),
+            "(color, fen, user_move, top_moves, avg_cp_loss, pair_count, opening_eco, opening_name, move_list, analyzed_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (color, item["fen"], item["user_move"], *payload),
         )
 
 
@@ -963,6 +1002,120 @@ def get_practice_history(color: str, limit: int = 10) -> list[dict[str, Any]]:
         return [dict(row) for row in rows]
 
 
+# ── Mistake attempts & SM-2 ────────────────────────────────────────────────
+
+def record_mistake_attempt(mistake_id: int, correct: bool) -> None:
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO mistake_attempts (mistake_id, correct, attempted_at) VALUES (?,?,?)",
+            (mistake_id, 1 if correct else 0, now_iso()),
+        )
+
+
+def update_sm2(mistake_id: int, correct: bool) -> None:
+    """Advance SM-2 scheduling for a mistake after a practice attempt."""
+    with get_db() as db:
+        row = db.execute(
+            "SELECT sm2_interval, sm2_ease, sm2_reps FROM mistakes WHERE id=?",
+            (mistake_id,),
+        ).fetchone()
+        if not row:
+            return
+        interval = int(row["sm2_interval"] or 1)
+        ease = float(row["sm2_ease"] or 2.5)
+        reps = int(row["sm2_reps"] or 0)
+        quality = 5 if correct else 1
+        if quality < 3:
+            interval = 1
+            reps = 0
+        else:
+            if reps == 0:
+                interval = 1
+            elif reps == 1:
+                interval = 6
+            else:
+                interval = max(1, round(interval * ease))
+            reps += 1
+        ease = max(1.3, ease + 0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
+        due_at = (datetime.now(timezone.utc) + timedelta(days=interval)).date().isoformat()
+        db.execute(
+            "UPDATE mistakes SET sm2_interval=?, sm2_ease=?, sm2_reps=?, sm2_due_at=? WHERE id=?",
+            (interval, round(ease, 3), reps, due_at, mistake_id),
+        )
+
+
+# ── Opening breakdown ─────────────────────────────────────────────────────
+
+def get_opening_breakdown(color: str) -> list[dict[str, Any]]:
+    """Aggregate mistakes per opening for heatmap/breakdown display."""
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT
+                COALESCE(opening_eco, '?') AS eco,
+                COALESCE(opening_name, 'Unlabeled') AS name,
+                SUM(CASE WHEN mastered=0 AND snoozed=0 THEN 1 ELSE 0 END) AS active,
+                SUM(CASE WHEN mastered=1 THEN 1 ELSE 0 END) AS mastered_count,
+                SUM(CASE WHEN snoozed=1 AND mastered=0 THEN 1 ELSE 0 END) AS snoozed_count,
+                ROUND(AVG(CASE WHEN mastered=0 AND snoozed=0 THEN avg_cp_loss END)) AS avg_cp_loss,
+                SUM(pair_count) AS total_occurrences
+            FROM mistakes
+            WHERE color=?
+            GROUP BY COALESCE(opening_eco, '?'), COALESCE(opening_name, 'Unlabeled')
+            ORDER BY active DESC, avg_cp_loss DESC
+            """,
+            (color,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            total = (d["active"] or 0) + (d["mastered_count"] or 0) + (d["snoozed_count"] or 0)
+            d["total"] = total
+            d["mastery_rate"] = round((d["mastered_count"] or 0) / total, 2) if total > 0 else 0.0
+            d["avg_cp_loss"] = int(d["avg_cp_loss"] or 0)
+            result.append(d)
+        return result
+
+
+# ── Practice activity calendar ────────────────────────────────────────────
+
+def get_practice_calendar(days: int = 91) -> list[dict[str, Any]]:
+    """Return per-day attempt counts for the last N days."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT DATE(attempted_at) AS day, COUNT(*) AS total, SUM(correct) AS correct
+            FROM mistake_attempts
+            WHERE attempted_at >= ?
+            GROUP BY DATE(attempted_at)
+            ORDER BY day ASC
+            """,
+            (cutoff,),
+        ).fetchall()
+        return [
+            {"day": row["day"], "total": int(row["total"]), "correct": int(row["correct"] or 0)}
+            for row in rows
+        ]
+
+
+# ── App settings ──────────────────────────────────────────────────────────
+
+def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
+    with get_db() as db:
+        row = db.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+        return str(row["value"]) if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+
+
 # ── App logs ──────────────────────────────────────────────────────────────
 
 _LOG_MAX_ROWS = int(os.environ.get("CHESS_ANALYZER_LOG_MAX_ROWS", "5000"))
@@ -1005,6 +1158,7 @@ def list_logs(limit: int = 200) -> list[dict[str, Any]]:
 def clear_all() -> None:
     with get_db() as db:
         db.execute("DELETE FROM mistakes")
+        db.execute("DELETE FROM mistake_attempts")
         db.execute("DELETE FROM pgn_files")
         db.execute("DELETE FROM analysis_runs")
         db.execute("DELETE FROM analysis_checkpoints")
@@ -1115,6 +1269,7 @@ def import_backup(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = _normalize_backup(payload)
     with get_db() as db:
         db.execute("DELETE FROM mistakes")
+        db.execute("DELETE FROM mistake_attempts")
         db.execute("DELETE FROM pgn_files")
         db.execute("DELETE FROM analysis_runs")
         db.execute("DELETE FROM analysis_checkpoints")

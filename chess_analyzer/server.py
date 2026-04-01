@@ -44,6 +44,15 @@ class PracticeSessionIn(BaseModel):
     best_streak: int = Field(ge=0)
 
 
+class PracticeAttemptIn(BaseModel):
+    mistake_id: int = Field(gt=0)
+    correct: bool
+
+
+class AnalysisDepthIn(BaseModel):
+    depth: int = Field(ge=1, le=30)
+
+
 app = FastAPI(
     title="Chess Analyzer",
     description="Analyze your chess opening mistakes and train to fix them.",
@@ -106,6 +115,7 @@ async def status() -> JSONResponse:
             "schema_version": db.get_schema_version(),
             "dev_mode": _dev_mode(),
             "analysis_batch_games": analysis.ANALYSIS_BATCH_GAMES,
+            "analysis_depth": int(db.get_setting("analysis_depth") or analysis.ANALYSIS_DEPTH),
         }
     )
 
@@ -356,6 +366,37 @@ async def import_data(file: UploadFile = File(...)) -> JSONResponse:
 @app.get("/api/summary")
 async def summary() -> JSONResponse:
     return JSONResponse(db.get_summary())
+
+
+@app.post("/api/practice/attempt", status_code=201)
+async def record_practice_attempt(body: PracticeAttemptIn) -> JSONResponse:
+    db.record_mistake_attempt(body.mistake_id, body.correct)
+    db.update_sm2(body.mistake_id, body.correct)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/openings/{color}")
+async def get_opening_breakdown(color: Color) -> JSONResponse:
+    return JSONResponse({"openings": db.get_opening_breakdown(color.value)})
+
+
+@app.get("/api/practice/calendar")
+async def get_practice_calendar(days: int = 91) -> JSONResponse:
+    days = max(7, min(365, days))
+    return JSONResponse({"calendar": db.get_practice_calendar(days)})
+
+
+@app.put("/api/settings/analysis-depth")
+async def set_analysis_depth(body: AnalysisDepthIn) -> JSONResponse:
+    db.set_setting("analysis_depth", str(body.depth))
+    return JSONResponse({"ok": True, "depth": body.depth})
+
+
+@app.get("/api/settings/analysis-depth")
+async def get_analysis_depth() -> JSONResponse:
+    raw = db.get_setting("analysis_depth")
+    depth = int(raw) if raw else analysis.ANALYSIS_DEPTH
+    return JSONResponse({"depth": depth})
 
 
 @app.get("/health", include_in_schema=False)

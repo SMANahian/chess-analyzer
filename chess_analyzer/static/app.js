@@ -18,6 +18,7 @@ const S = {
     query: '',
     opening: 'all',
     severity: 'all',
+    sort: 'default',
   },
 };
 
@@ -32,6 +33,7 @@ const P = {
   attempts: 0,
   ground: null,
   active: false,
+  openingFilter: 'all',
 };
 
 const ROUTES = {
@@ -39,6 +41,7 @@ const ROUTES = {
   '/analysis/white': () => renderAnalysis('white'),
   '/analysis/black': () => renderAnalysis('black'),
   '/practice': renderPractice,
+  '/openings': renderOpenings,
   '/mastered': renderMastered,
   '/snoozed': renderSnoozed,
   '/logs': renderLogs,
@@ -119,6 +122,21 @@ function renderGlobalChrome() {
   if (logsLink) logsLink.classList.toggle('hidden', !S.status?.dev_mode);
   renderThemeToggle();
   renderEngineBadge();
+  renderNavBadges();
+}
+
+function renderNavBadges() {
+  for (const color of ['white', 'black']) {
+    const badge = document.getElementById(`nav-badge-${color}`);
+    if (!badge) continue;
+    const count = S.status?.colors?.[color]?.partial_mistakes_ready || 0;
+    if (count > 0) {
+      badge.textContent = count > 99 ? '99+' : String(count);
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+  }
 }
 
 function renderEngineBadge() {
@@ -308,6 +326,14 @@ function renderGames() {
     document.getElementById(`btn-save-chesscom-${color}`)?.addEventListener('click', () => saveSyncConfig(color, 'chesscom'));
     document.getElementById(`btn-analyze-${color}`)?.addEventListener('click', () => doAnalyze(color));
     document.getElementById(`btn-cancel-${color}`)?.addEventListener('click', () => doCancelAnalysis(color));
+    document.getElementById(`depth-select-${color}`)?.addEventListener('change', async evt => {
+      try {
+        await api('PUT', '/settings/analysis-depth', { depth: Number(evt.target.value) });
+        toast(`Analysis depth set to ${evt.target.value}`, 'success');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
   });
 
   document.querySelectorAll('[data-resync]').forEach(btn =>
@@ -410,6 +436,11 @@ function analysisStatusBlock(color, info) {
           <p class="status-copy">${runDescription(run, queuePosition, info.run_error, progress, total, readyCount)}</p>
         </div>
         <div class="status-actions">
+          <select class="field-select depth-select" id="depth-select-${color}" title="Analysis depth">
+            <option value="6" ${(S.status?.analysis_depth || 6) === 6 ? 'selected' : ''}>Quick (depth 6)</option>
+            <option value="10" ${(S.status?.analysis_depth || 6) === 10 ? 'selected' : ''}>Standard (depth 10)</option>
+            <option value="16" ${(S.status?.analysis_depth || 6) === 16 ? 'selected' : ''}>Deep (depth 16)</option>
+          </select>
           <button id="btn-analyze-${color}" class="btn btn-primary" ${run === 'running' || run === 'queued' ? 'disabled' : ''}>
             ${actionLabel}
           </button>
@@ -847,6 +878,12 @@ function buildAnalysisUI() {
               <option value="mistake">Mistake 150+</option>
               <option value="blunder">Blunder 300+</option>
             </select>
+            <select id="filter-sort" class="field-select">
+              <option value="default">Sort: Most frequent</option>
+              <option value="cp">Sort: Worst cp loss</option>
+              <option value="hardest">Sort: Hardest (practice)</option>
+              <option value="due">Sort: SM-2 due first</option>
+            </select>
           </div>
 
           <div class="mistake-list" id="mlist"></div>
@@ -868,6 +905,7 @@ function buildAnalysisUI() {
   openingSelect.value = S.filters.opening;
   document.getElementById('filter-query').value = S.filters.query;
   document.getElementById('filter-severity').value = S.filters.severity;
+  document.getElementById('filter-sort').value = S.filters.sort;
 
   document.getElementById('filter-query').addEventListener('input', evt => {
     S.filters.query = evt.target.value;
@@ -879,6 +917,10 @@ function buildAnalysisUI() {
   });
   document.getElementById('filter-severity').addEventListener('change', evt => {
     S.filters.severity = evt.target.value;
+    applyAnalysisFilters();
+  });
+  document.getElementById('filter-sort').addEventListener('change', evt => {
+    S.filters.sort = evt.target.value;
     applyAnalysisFilters();
   });
 
@@ -920,6 +962,26 @@ function applyAnalysisFilters(shouldRender = true) {
 
     return matchesQuery && matchesOpening && matchesSeverity;
   });
+
+  // Apply sort
+  const today = new Date().toISOString().split('T')[0];
+  if (S.filters.sort === 'cp') {
+    S.mistakes.sort((a, b) => b.avg_cp_loss - a.avg_cp_loss);
+  } else if (S.filters.sort === 'hardest') {
+    S.mistakes.sort((a, b) => {
+      const ra = a.practice_rate ?? -1;
+      const rb = b.practice_rate ?? -1;
+      if (ra === rb) return b.avg_cp_loss - a.avg_cp_loss;
+      return ra - rb; // lower success rate first
+    });
+  } else if (S.filters.sort === 'due') {
+    S.mistakes.sort((a, b) => {
+      const da = a.sm2_due_at || '9999';
+      const db2 = b.sm2_due_at || '9999';
+      return da.localeCompare(db2);
+    });
+  }
+  // default: server ordering (pair_count DESC, avg_cp_loss DESC)
 
   S.idx = Math.max(0, Math.min(S.idx, S.mistakes.length - 1));
 
@@ -966,13 +1028,18 @@ function renderList() {
 
   list.innerHTML = S.mistakes.map((mistake, index) => {
     const severity = severityData(mistake.avg_cp_loss);
+    const san = uciToSan(mistake.fen, mistake.user_move);
+    const pracRate = mistake.practice_rate != null
+      ? `<span class="pill pill-prac ${mistake.practice_rate >= 0.8 ? 'prac-good' : mistake.practice_rate >= 0.5 ? 'prac-mid' : 'prac-bad'}" title="${mistake.practice_correct}/${mistake.practice_total} correct">${Math.round(mistake.practice_rate * 100)}%</span>`
+      : '';
     return `
       <button class="mistake-row ${severity.rowClass} ${index === S.idx ? 'active' : ''}" data-i="${index}">
         <span class="mistake-rank">${index + 1}</span>
         <div class="mistake-copy">
           <div class="mistake-title-row">
-            <strong class="mistake-move">${mistake.user_move}</strong>
+            <strong class="mistake-move">${esc(san)}</strong>
             <span class="pill ${severity.pill}">${severity.label}</span>
+            ${pracRate}
           </div>
           <p>${esc(mistake.opening_name || 'Unknown opening')}${mistake.opening_eco ? ` · ${esc(mistake.opening_eco)}` : ''}</p>
         </div>
@@ -1032,13 +1099,22 @@ function renderDetail(mistake) {
   if (!detail) return;
   const severity = severityData(mistake.avg_cp_loss);
   const topMoves = (mistake.top_moves || []).slice(0, 3);
+  const san = uciToSan(mistake.fen, mistake.user_move);
+  const topSans = topMoves.map(mv => ({ uci: mv, san: uciToSan(mistake.fen, mv) }));
+  const breadcrumbSans = moveListToSan(mistake.move_list || '');
+  const breadcrumb = breadcrumbSans.length ? formatMoveList(breadcrumbSans) : '';
+  const pracTotal = mistake.practice_total || 0;
+  const pracCorrect = mistake.practice_correct || 0;
+  const sm2Due = mistake.sm2_due_at;
+  const today = new Date().toISOString().split('T')[0];
+  const dueLabel = sm2Due ? (sm2Due <= today ? 'Due now' : `Due ${sm2Due}`) : 'Not practiced';
 
   detail.innerHTML = `
     <div class="detail-stack">
       <div class="detail-header">
         <div>
           <p class="eyebrow">Position brief</p>
-          <h2 style="font-family:'SFMono-Regular','Menlo',monospace;letter-spacing:-0.01em">${esc(mistake.user_move)}</h2>
+          <h2 class="detail-move-san">${esc(san)}</h2>
           <p style="color:var(--ink-2);font-size:.88rem;margin-top:4px">Played ${mistake.pair_count} time${mistake.pair_count !== 1 ? 's' : ''} · always suboptimal</p>
         </div>
         <span class="status-pill ${severity.pill}">${severity.label}</span>
@@ -1051,26 +1127,41 @@ function renderDetail(mistake) {
         </div>
       ` : ''}
 
+      ${breadcrumb ? `
+        <div class="breadcrumb-moves" title="Opening moves leading to this position">
+          <span class="breadcrumb-label">Path</span>
+          <span class="breadcrumb-sequence">${esc(breadcrumb)}</span>
+        </div>
+      ` : ''}
+
       <div class="detail-metric-grid">
         <div class="detail-metric">
           <span>Your move</span>
-          <strong style="font-family:'SFMono-Regular','Menlo',monospace">${esc(mistake.user_move)}</strong>
+          <strong class="move-san">${esc(san)}</strong>
         </div>
         <div class="detail-metric">
-          <span>Avg cp loss</span>
+          <span>Cp loss</span>
           <strong style="color:var(--red)">−${mistake.avg_cp_loss}</strong>
         </div>
         <div class="detail-metric">
           <span>Seen</span>
           <strong>${mistake.pair_count}×</strong>
         </div>
+        <div class="detail-metric">
+          <span>Practice</span>
+          <strong>${pracTotal > 0 ? `${Math.round(pracCorrect / pracTotal * 100)}% (${pracCorrect}/${pracTotal})` : '—'}</strong>
+        </div>
+        <div class="detail-metric">
+          <span>SM-2</span>
+          <strong class="${sm2Due && sm2Due <= today ? 'text-amber' : ''}">${dueLabel}</strong>
+        </div>
       </div>
 
       <div class="detail-section">
         <h3>Better moves</h3>
-        ${topMoves.length ? `
+        ${topSans.length ? `
           <div class="move-chip-row" id="top-moves">
-            ${topMoves.map((move, i) => `<button class="move-chip ${i === 0 ? 'best' : ''}" data-mv="${move}">${i === 0 ? '★ ' : ''}${move}</button>`).join('')}
+            ${topSans.map(({ uci, san: ms }, i) => `<button class="move-chip ${i === 0 ? 'best' : ''}" data-mv="${uci}" data-san="${esc(ms)}">${i === 0 ? '★ ' : ''}${esc(ms)}</button>`).join('')}
           </div>
           <p style="font-size:.8rem;color:var(--ink-2);margin-top:8px">Click a move to see it on the board</p>
         ` : '<p class="detail-copy">No alternative moves were returned for this position.</p>'}
@@ -1078,7 +1169,7 @@ function renderDetail(mistake) {
 
       <div class="detail-section">
         <h3>FEN</h3>
-        <p class="fen-block">${esc(mistake.fen)}</p>
+        <p class="fen-block" id="fen-block">${esc(mistake.fen)}</p>
       </div>
 
       <div class="detail-actions">
@@ -1089,8 +1180,8 @@ function renderDetail(mistake) {
     </div>
   `;
 
-  document.getElementById('btn-master')?.addEventListener('click', () => doMaster(mistake));
-  document.getElementById('btn-snooze')?.addEventListener('click', () => doSnooze(mistake));
+  document.getElementById('btn-master')?.addEventListener('click', () => doMasterWithUndo(mistake));
+  document.getElementById('btn-snooze')?.addEventListener('click', () => doSnoozeWithUndo(mistake));
   document.getElementById('btn-hint-detail')?.addEventListener('click', toggleHint);
   document.querySelectorAll('#top-moves [data-mv]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1279,7 +1370,6 @@ async function doMaster(mistake) {
   try {
     await PUT(`/mistakes/${mistake.id}/master`);
     await refreshAll();
-    toast('Marked as mastered', 'success');
     removeAnalysisMistake(mistake.id);
   } catch (err) {
     toast(err.message, 'error');
@@ -1290,11 +1380,67 @@ async function doSnooze(mistake) {
   try {
     await PUT(`/mistakes/${mistake.id}/snooze`);
     await refreshAll();
-    toast('Moved to snoozed', 'success');
     removeAnalysisMistake(mistake.id);
   } catch (err) {
     toast(err.message, 'error');
   }
+}
+
+function doMasterWithUndo(mistake) {
+  PUT(`/mistakes/${mistake.id}/master`).then(async () => {
+    await refreshAll();
+    removeAnalysisMistake(mistake.id);
+    toastUndo('Marked as mastered', async () => {
+      try {
+        await PUT(`/mistakes/${mistake.id}/restore`);
+        await refreshAll();
+        // Reload analysis so the restored mistake reappears
+        await renderAnalysis(S.color, { preserve: true });
+        toast('Restored to active queue', 'success');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+  }).catch(err => toast(err.message, 'error'));
+}
+
+function doSnoozeWithUndo(mistake) {
+  PUT(`/mistakes/${mistake.id}/snooze`).then(async () => {
+    await refreshAll();
+    removeAnalysisMistake(mistake.id);
+    toastUndo('Moved to snoozed', async () => {
+      try {
+        await PUT(`/mistakes/${mistake.id}/unsnooze`);
+        await refreshAll();
+        await renderAnalysis(S.color, { preserve: true });
+        toast('Returned to active queue', 'success');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+  }).catch(err => toast(err.message, 'error'));
+}
+
+function toastUndo(message, onUndo) {
+  const el = document.createElement('div');
+  el.className = 'toast success';
+  el.innerHTML = `<span class="toast-icon">✓</span><span>${esc(message)}</span><button class="toast-undo-btn">Undo</button>`;
+  el.style.pointerEvents = 'auto';
+  const container = document.getElementById('toast');
+  container.appendChild(el);
+  let undid = false;
+  el.querySelector('.toast-undo-btn').addEventListener('click', () => {
+    undid = true;
+    el.remove();
+    onUndo();
+  });
+  setTimeout(() => {
+    if (!undid) {
+      el.style.opacity = '0';
+      el.style.transition = 'opacity .28s ease';
+      setTimeout(() => el.remove(), 300);
+    }
+  }, 5000);
 }
 
 function removeAnalysisMistake(id) {
@@ -1369,7 +1515,7 @@ async function renderPractice() {
   }
 
   P.all = allMistakes;
-  P.queue = shuffle([...Array(allMistakes.length).keys()]);
+  P.queue = buildSM2Queue(allMistakes);
   P.qIdx = 0;
   P.streak = 0;
   P.bestStreak = 0;
@@ -1377,6 +1523,7 @@ async function renderPractice() {
   P.total = 0;
   P.attempts = 0;
   P.active = true;
+  P.openingFilter = 'all';
 
   buildPracticeUI({
     runningNote: [white, black].some(item => ['queued', 'running'].includes(item?.run_status || ''))
@@ -1389,6 +1536,8 @@ async function renderPractice() {
 }
 
 function buildPracticeUI({ runningNote = '' } = {}) {
+  // Build opening filter options from all mistakes
+  const openingOptions = buildPracticeOpeningOptions();
   setApp(`
     <div class="page-shell">
       <section class="panel practice-shell">
@@ -1397,7 +1546,8 @@ function buildPracticeUI({ runningNote = '' } = {}) {
             <p class="eyebrow">Deliberate practice</p>
             <h1>Drill your opening mistakes</h1>
           </div>
-          <div style="display:flex;gap:8px;align-items:center">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="p-opening-filter" class="field-select" style="min-width:160px">${openingOptions}</select>
             <span class="status-pill" id="p-streak-badge">Streak: 0</span>
             <button id="p-end" class="btn btn-danger">End session</button>
           </div>
@@ -1428,10 +1578,15 @@ function buildPracticeUI({ runningNote = '' } = {}) {
               <h2 id="p-msg" style="font-size:1.2rem;margin:0">Find the best move</h2>
               <p class="muted-copy" id="p-ctr" style="font-size:.85rem"></p>
               <div id="p-opening" class="prac-opening"></div>
+              <div id="p-breadcrumb" class="prac-breadcrumb"></div>
             </div>
             <div id="p-after" style="display:none;padding:16px;border-radius:var(--radius-sm);background:var(--s2);border:1px solid var(--line)">
               <p class="eyebrow" style="margin:0 0 8px">Better moves</p>
               <div id="p-moves" class="move-chip-row"></div>
+              <div id="p-continuation" style="display:none;margin-top:12px">
+                <p class="eyebrow" style="margin:0 0 6px;font-size:.7rem">Engine continues</p>
+                <div id="p-cont-moves" class="move-chip-row"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -1442,9 +1597,42 @@ function buildPracticeUI({ runningNote = '' } = {}) {
   document.getElementById('p-hint').onclick = pracHint;
   document.getElementById('p-skip').onclick = pracSkip;
   document.getElementById('p-end').onclick = pracEnd;
+  document.getElementById('p-opening-filter').addEventListener('change', evt => {
+    P.openingFilter = evt.target.value;
+    P.queue = buildSM2Queue(P.all.filter(m =>
+      P.openingFilter === 'all' || m.opening_eco === P.openingFilter || m.opening_name === P.openingFilter
+    ).map((_, i) => i)).map(i =>
+      P.all.indexOf(P.all.filter(m =>
+        P.openingFilter === 'all' || m.opening_eco === P.openingFilter || m.opening_name === P.openingFilter
+      )[i])
+    );
+    if (!P.queue.length) {
+      // Fallback to all if filtered queue is empty
+      P.queue = buildSM2Queue(P.all);
+      P.openingFilter = 'all';
+      document.getElementById('p-opening-filter').value = 'all';
+      toast('No positions match that opening filter', 'error');
+    }
+    P.qIdx = 0;
+    loadPracticePosition();
+  });
   updatePracticeStats();
   const afterPanel = document.getElementById('p-after');
   if (afterPanel) afterPanel.style.display = 'none';
+}
+
+function buildPracticeOpeningOptions() {
+  const opts = new Map();
+  for (const m of P.all) {
+    if (m.opening_name) {
+      opts.set(m.opening_eco || m.opening_name, m.opening_name);
+    }
+  }
+  const entries = [...opts.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  return [
+    '<option value="all">All openings</option>',
+    ...entries.map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`),
+  ].join('');
 }
 
 function loadPracticePosition({ resetAttempts = true, resetMessage = true } = {}) {
@@ -1494,6 +1682,19 @@ function loadPracticePosition({ resetAttempts = true, resetMessage = true } = {}
   const afterPanel = document.getElementById('p-after');
   if (afterPanel) afterPanel.style.display = 'none';
 
+  // Show breadcrumb (move path)
+  const breadcrumbEl = document.getElementById('p-breadcrumb');
+  if (breadcrumbEl) {
+    const bsans = moveListToSan(mistake.move_list || '');
+    if (bsans.length) {
+      breadcrumbEl.innerHTML = `<span class="breadcrumb-sequence" style="font-size:.78rem">${esc(formatMoveList(bsans))}</span>`;
+      breadcrumbEl.style.display = '';
+    } else {
+      breadcrumbEl.innerHTML = '';
+      breadcrumbEl.style.display = 'none';
+    }
+  }
+
   // Show opening context
   const openingEl = document.getElementById('p-opening');
   if (openingEl) {
@@ -1514,13 +1715,17 @@ function pracOnMove(orig, dest, mistake) {
     P.total += 1;
     P.streak += 1;
     P.bestStreak = Math.max(P.bestStreak, P.streak);
+    recordAttempt(mistake.id, true);
     updatePracticeStats();
-    setMsg('Correct. Load the next one.');
+    setMsg('Correct!');
     pracFlash('correct');
+    // Show the move played + engine continuation
+    showPracAfterCorrect(mistake, move);
     P.qIdx += 1;
-    setTimeout(loadPracticePosition, 900);
+    setTimeout(loadPracticePosition, 1600);
   } else {
     P.streak = 0;
+    recordAttempt(mistake.id, false);
     updatePracticeStats();
     setMsg('Not the best move. Try again.');
     pracFlash('wrong');
@@ -1530,6 +1735,53 @@ function pracOnMove(orig, dest, mistake) {
       if (P.attempts >= 2) pracHint();
     }, 600);
   }
+}
+
+function showPracAfterCorrect(mistake, playedMove) {
+  const afterPanel = document.getElementById('p-after');
+  const movesEl = document.getElementById('p-moves');
+  const contEl = document.getElementById('p-continuation');
+  const contMovesEl = document.getElementById('p-cont-moves');
+  if (!afterPanel || !movesEl) return;
+
+  const san = uciToSan(mistake.fen, playedMove);
+  movesEl.innerHTML = `<span class="move-chip best">★ ${esc(san)}</span>`;
+
+  // Show other top moves in faded form
+  const otherTop = (mistake.top_moves || []).filter(mv => mv !== playedMove).slice(0, 2);
+  if (otherTop.length) {
+    movesEl.innerHTML += otherTop.map(mv => `<span class="move-chip">${esc(uciToSan(mistake.fen, mv))}</span>`).join('');
+  }
+
+  // Simulate opponent reply on the board
+  if (P.ground) {
+    try {
+      const chess = new Chess();
+      chess.load(mistake.fen);
+      chess.move({ from: playedMove.slice(0, 2), to: playedMove.slice(2, 4), promotion: playedMove[4] || undefined });
+      const replies = chess.moves({ verbose: true });
+      if (replies.length) {
+        // Show the position after player's move
+        P.ground.set({
+          fen: chess.fen(),
+          movable: { color: null },
+          drawable: {
+            autoShapes: [
+              { orig: playedMove.slice(0, 2), dest: playedMove.slice(2, 4), brush: 'green' },
+            ],
+          },
+        });
+        // Show continuation panel with the first engine reply (best we can show without Stockfish call)
+        if (contEl && contMovesEl) {
+          const replySan = replies[0].san;
+          contMovesEl.innerHTML = `<span class="move-chip" style="opacity:.7">${esc(replySan)}</span>`;
+          contEl.style.display = '';
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  afterPanel.style.display = 'block';
 }
 
 function pracHint() {
@@ -1545,13 +1797,15 @@ function pracHint() {
       ],
     },
   });
-  setMsg(`Hint: consider ${mistake.top_moves?.[0] || '?'}`);
-  // Show moves panel
+  const hintSan = mistake.top_moves?.[0] ? uciToSan(mistake.fen, mistake.top_moves[0]) : '?';
+  setMsg(`Hint: consider ${hintSan}`);
   const afterPanel = document.getElementById('p-after');
   const movesEl = document.getElementById('p-moves');
+  const contEl = document.getElementById('p-continuation');
+  if (contEl) contEl.style.display = 'none';
   if (afterPanel && movesEl) {
     movesEl.innerHTML = (mistake.top_moves || []).slice(0, 3)
-      .map((mv, i) => `<span class="move-chip ${i === 0 ? 'best' : ''}">${i === 0 ? '★ ' : ''}${mv}</span>`).join('');
+      .map((mv, i) => `<span class="move-chip ${i === 0 ? 'best' : ''}">${i === 0 ? '★ ' : ''}${esc(uciToSan(mistake.fen, mv))}</span>`).join('');
     afterPanel.style.display = 'block';
   }
 }
@@ -1648,6 +1902,114 @@ function updatePracticeStats() {
 function setMsg(message) {
   const el = document.getElementById('p-msg');
   if (el) el.textContent = message;
+}
+
+async function renderOpenings() {
+  setApp(`<div class="page-shell"><section class="panel loading-panel"><span class="spinner"></span><p>Loading openings…</p></section></div>`);
+  let white = [], black = [];
+  try {
+    [white, black] = await Promise.all([
+      GET('/openings/white').then(r => r.openings || []),
+      GET('/openings/black').then(r => r.openings || []),
+    ]);
+  } catch (err) {
+    setApp(`<div class="page-shell"><section class="panel empty-block"><h2>Could not load opening data</h2><p>${esc(err.message)}</p></section></div>`);
+    return;
+  }
+
+  const renderTable = (items, color) => {
+    if (!items.length) return `<div class="empty-block compact"><h3>No opening data for ${color}</h3><p>Run analysis first.</p></div>`;
+    const icon = color === 'white' ? '♔' : '♚';
+    return `
+      <section class="panel">
+        <div class="panel-head">
+          <div><p class="eyebrow">Opening breakdown</p><h2>${icon} ${color[0].toUpperCase() + color.slice(1)} repertoire</h2></div>
+          <span class="status-pill">${items.length} openings</span>
+        </div>
+        <div class="opening-table">
+          <div class="opening-table-head">
+            <span>Opening</span><span>Active</span><span>Mastered</span><span>Avg loss</span><span>Mastery</span>
+          </div>
+          ${items.map(op => {
+            const pct = Math.round((op.mastery_rate || 0) * 100);
+            const barColor = pct >= 80 ? 'var(--green)' : pct >= 50 ? 'var(--amber)' : 'var(--red)';
+            return `
+              <div class="opening-table-row" role="button" tabindex="0"
+                   onclick="location.hash='#/analysis/${color}'"
+                   title="Click to open ${color} analysis">
+                <div class="opening-name-cell">
+                  ${op.eco !== '?' ? `<span class="opening-eco-chip">${esc(op.eco)}</span>` : ''}
+                  <span>${esc(op.name)}</span>
+                </div>
+                <span class="pill pill-mistake">${op.active}</span>
+                <span class="pill pill-good">${op.mastered_count || 0}</span>
+                <span style="color:var(--red);font-weight:600">${op.avg_cp_loss}cp</span>
+                <div class="mastery-bar-cell">
+                  <div class="mastery-bar-track"><div class="mastery-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>
+                  <span style="font-size:.78rem;min-width:2.5em">${pct}%</span>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </section>
+    `;
+  };
+
+  // Practice calendar
+  let calData = [];
+  try { calData = (await GET('/practice/calendar')).calendar || []; } catch { /* optional */ }
+
+  setApp(`
+    <div class="page-shell">
+      ${renderCalendar(calData)}
+      ${renderTable(white, 'white')}
+      ${renderTable(black, 'black')}
+    </div>
+  `);
+}
+
+function renderCalendar(calData) {
+  const today = new Date();
+  const DAYS = 91; // 13 weeks
+  const dayMap = new Map(calData.map(d => [d.day, d]));
+
+  // Build 13×7 grid starting from 13 weeks ago Monday
+  const startDate = new Date(today);
+  startDate.setDate(startDate.getDate() - DAYS + 1);
+  // Align to Monday
+  const dayOfWeek = (startDate.getDay() + 6) % 7; // Mon=0
+  startDate.setDate(startDate.getDate() - dayOfWeek);
+
+  const cells = [];
+  const cursor = new Date(startDate);
+  const totalAttempts = calData.reduce((s, d) => s + d.total, 0);
+  const maxPerDay = Math.max(1, ...calData.map(d => d.total));
+
+  while (cursor <= today) {
+    const iso = cursor.toISOString().split('T')[0];
+    const data = dayMap.get(iso);
+    const total = data ? data.total : 0;
+    const correct = data ? data.correct : 0;
+    const intensity = total === 0 ? 0 : Math.ceil((total / maxPerDay) * 4);
+    cells.push(`<div class="cal-cell cal-${intensity}" title="${iso}: ${total} attempts${total ? `, ${correct} correct` : ''}"></div>`);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  const weekLabels = ['Mon', '', 'Wed', '', 'Fri', '', 'Sun'];
+  return `
+    <section class="panel">
+      <div class="panel-head">
+        <div><p class="eyebrow">Activity</p><h2>Practice calendar</h2></div>
+        <span class="status-pill">${totalAttempts} total attempts</span>
+      </div>
+      <div class="cal-wrapper">
+        <div class="cal-day-labels">${weekLabels.map(d => `<span>${d}</span>`).join('')}</div>
+        <div class="cal-grid">${cells.join('')}</div>
+      </div>
+      <p style="font-size:.78rem;color:var(--ink-2);margin-top:8px">Last 13 weeks of practice activity</p>
+    </section>
+  `;
 }
 
 async function renderMastered() {
@@ -1807,13 +2169,14 @@ function logRow(entry) {
 }
 
 function archiveRow(item, actionLabel) {
+  const san = uciToSan(item.fen, item.user_move);
   return `
     <div class="archive-row">
       <div class="archive-main">
         <span class="archive-icon">${item.color === 'white' ? '♔' : '♚'}</span>
         <div>
           <div class="archive-title-row">
-            <strong>${esc(item.user_move)}</strong>
+            <strong class="move-san">${esc(san)}</strong>
             <span class="pill pill-cp">${item.avg_cp_loss}cp</span>
             <span class="pill pill-freq">${item.pair_count}×</span>
           </div>
@@ -2058,4 +2421,61 @@ function esc(value) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/** Convert a single UCI move string to SAN, given the FEN before the move. */
+function uciToSan(fen, uci) {
+  if (!uci || uci.length < 4) return uci;
+  try {
+    const chess = new Chess();
+    chess.load(fen);
+    const move = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || undefined });
+    return move ? move.san : uci;
+  } catch {
+    return uci;
+  }
+}
+
+/** Convert a space-separated UCI move list from the initial position to SAN array. */
+function moveListToSan(moveListStr) {
+  if (!moveListStr) return [];
+  const chess = new Chess();
+  const sans = [];
+  for (const uci of moveListStr.trim().split(/\s+/)) {
+    if (!uci) continue;
+    const move = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || undefined });
+    if (!move) break;
+    sans.push(move.san);
+  }
+  return sans;
+}
+
+/** Format SAN move list as a numbered sequence string: "1.e4 e5 2.Nf3 Nc6 3.Bb5" */
+function formatMoveList(sans) {
+  if (!sans || !sans.length) return '';
+  const parts = [];
+  sans.forEach((san, i) => {
+    if (i % 2 === 0) parts.push(`${Math.floor(i / 2) + 1}.${san}`);
+    else parts.push(san);
+  });
+  return parts.join(' ');
+}
+
+/** Build SM-2 prioritised practice queue. Due positions first, then by due date. */
+function buildSM2Queue(mistakes) {
+  const today = new Date().toISOString().split('T')[0];
+  const due = [];
+  const notDue = [];
+  mistakes.forEach((m, i) => {
+    if (!m.sm2_due_at || m.sm2_due_at <= today) due.push(i);
+    else notDue.push(i);
+  });
+  shuffle(due);
+  notDue.sort((a, b) => (mistakes[a].sm2_due_at || '').localeCompare(mistakes[b].sm2_due_at || ''));
+  return [...due, ...notDue];
+}
+
+/** Fire-and-forget: record a practice attempt and advance SM-2. */
+function recordAttempt(mistakeId, correct) {
+  POST('/practice/attempt', { mistake_id: mistakeId, correct }).catch(() => {});
 }

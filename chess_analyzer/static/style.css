@@ -1474,3 +1474,203 @@ nav {
   .metric-grid, .metric-grid.compact { grid-template-columns: repeat(2, 1fr); }
   .color-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Nav badges ─────────────────────────────────────────── */
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--gold);
+  color: #07111d;
+  font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 1;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+/* ── Undo toast button ──────────────────────────────────── */
+.toast-undo-btn {
+  margin-left: auto;
+  padding: 2px 10px;
+  border-radius: 6px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity .15s;
+  flex-shrink: 0;
+}
+.toast-undo-btn:hover { opacity: 1; }
+
+/* ── Move SAN display ───────────────────────────────────── */
+.detail-move-san {
+  font-family: "SFMono-Regular","Menlo",monospace;
+  letter-spacing: -0.01em;
+  font-size: 1.5rem;
+}
+.move-san {
+  font-family: "SFMono-Regular","Menlo",monospace;
+  letter-spacing: -0.01em;
+}
+.text-amber { color: var(--amber); }
+
+/* ── Breadcrumb / move path ─────────────────────────────── */
+.breadcrumb-moves {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--s1);
+  border: 1px solid var(--line);
+  font-size: 0.82rem;
+  flex-wrap: wrap;
+  line-height: 1.6;
+}
+.breadcrumb-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+.breadcrumb-sequence {
+  font-family: "SFMono-Regular","Menlo",monospace;
+  color: var(--ink-2);
+  font-size: 0.8rem;
+}
+
+.prac-breadcrumb {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--ink-2);
+  font-family: "SFMono-Regular","Menlo",monospace;
+}
+
+/* ── Practice difficulty pills ──────────────────────────── */
+.pill-prac { background: var(--s2); color: var(--ink-2); font-size: 0.72rem; }
+.prac-good { background: var(--green-bg); color: var(--green); }
+.prac-mid  { background: var(--amber-bg); color: var(--amber); }
+.prac-bad  { background: var(--red-bg);   color: var(--red); }
+.pill-good { background: var(--green-bg); color: var(--green); }
+
+/* ── Practice calendar heatmap ──────────────────────────── */
+.cal-wrapper {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.cal-day-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 2px;
+}
+.cal-day-labels span {
+  height: 14px;
+  font-size: 0.65rem;
+  color: var(--ink-3);
+  line-height: 14px;
+  white-space: nowrap;
+  width: 24px;
+}
+.cal-grid {
+  display: grid;
+  grid-template-rows: repeat(7, 14px);
+  grid-auto-flow: column;
+  gap: 3px;
+}
+.cal-cell {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--s2);
+}
+.cal-0 { background: var(--s2); }
+.cal-1 { background: rgba(76,206,138,0.18); }
+.cal-2 { background: rgba(76,206,138,0.35); }
+.cal-3 { background: rgba(76,206,138,0.55); }
+.cal-4 { background: var(--green); }
+
+/* ── Opening breakdown table ────────────────────────────── */
+.opening-table { display: flex; flex-direction: column; gap: 0; }
+
+.opening-table-head,
+.opening-table-row {
+  display: grid;
+  grid-template-columns: 1fr 60px 70px 70px 130px;
+  gap: 12px;
+  padding: 10px 12px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+.opening-table-head {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  padding-bottom: 8px;
+}
+.opening-table-row {
+  cursor: pointer;
+  transition: background .12s;
+  border-radius: var(--radius-sm);
+  border-bottom: 1px solid var(--line);
+}
+.opening-table-row:hover { background: var(--s1); }
+.opening-table-row:last-child { border-bottom: none; }
+
+.opening-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+.opening-name-cell span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.mastery-bar-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mastery-bar-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--s3);
+  overflow: hidden;
+}
+.mastery-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .3s ease;
+}
+
+/* ── Depth select in status row ─────────────────────────── */
+.depth-select { font-size: 0.82rem; padding: 5px 10px; min-width: 130px; }
+
+@media (max-width: 720px) {
+  .opening-table-head,
+  .opening-table-row {
+    grid-template-columns: 1fr 50px 90px;
+  }
+  .opening-table-head span:nth-child(2),
+  .opening-table-head span:nth-child(3),
+  .opening-table-row span:nth-child(2),
+  .opening-table-row span:nth-child(3) { display: none; }
+  .cal-grid { gap: 2px; }
+  .cal-cell { width: 11px; height: 11px; }
+}
