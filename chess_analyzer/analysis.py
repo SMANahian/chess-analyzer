@@ -85,13 +85,24 @@ def _collect_pairs(pgn_text: str, color: str) -> tuple[dict, dict]:
     return counts, fens
 
 
-def analyze(pgn_text: str, color: str) -> list[dict[str, Any]]:
-    """Run Stockfish analysis and return a list of mistake dicts."""
+def analyze(
+    pgn_text: str,
+    color: str,
+    progress_cb: Any = None,
+) -> list[dict[str, Any]]:
+    """Run Stockfish analysis and return a list of mistake dicts.
+
+    progress_cb(done, total) is called every few candidates if provided.
+    """
     counts, fens = _collect_pairs(pgn_text, color)
     candidates = [(k, n) for k, n in counts.items() if n >= MIN_OCCURRENCES]
     if not candidates:
+        if progress_cb:
+            progress_cb(0, 0)
         return []
     candidates.sort(key=lambda x: x[1], reverse=True)
+    if progress_cb:
+        progress_cb(0, len(candidates))
 
     pos_cache: dict[str, tuple[Optional[int], list[str]]] = {}
     after_cache: dict[str, Optional[int]] = {}
@@ -100,7 +111,7 @@ def analyze(pgn_text: str, color: str) -> list[dict[str, Any]]:
 
     engine, _ = start_engine()
     try:
-        for (pos_key, user_move), count in candidates:
+        for _done_i, ((pos_key, user_move), count) in enumerate(candidates):
             fen = fens.get((pos_key, user_move))
             if not fen:
                 continue
@@ -176,6 +187,9 @@ def analyze(pgn_text: str, color: str) -> list[dict[str, Any]]:
                 "pair_count":  count,
                 "color":       color,
             })
+
+            if progress_cb and (_done_i + 1) % 5 == 0:
+                progress_cb(_done_i + 1, len(candidates))
     finally:
         try:
             engine.quit()
@@ -190,8 +204,14 @@ def analyze(pgn_text: str, color: str) -> list[dict[str, Any]]:
 
 def analyze_in_background(pgn_text: str, color: str, run_id: int) -> None:
     def _task() -> None:
+        def _progress(done: int, total: int) -> None:
+            try:
+                db.update_run_progress(run_id, done, total)
+            except Exception:
+                pass
+
         try:
-            results = analyze(pgn_text, color)
+            results = analyze(pgn_text, color, progress_cb=_progress)
             db.replace_mistakes(color, results)
             db.finish_run(run_id)
         except Exception as exc:

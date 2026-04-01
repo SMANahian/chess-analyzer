@@ -1,20 +1,32 @@
 *, *::before, *::after { box-sizing: border-box; }
 body { font-family: system-ui, -apple-system, sans-serif; }
 
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 3px; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
 /* ── Nav ─────────────────────────────────────────────────────────────────── */
 .nav-link {
-  color: #9ca3af; font-size: .875rem; font-weight: 500;
-  padding: .2rem .5rem; border-radius: .375rem;
-  transition: color .15s, background .15s;
+  color: #9ca3af; font-size: .825rem; font-weight: 500;
+  padding: .25rem .55rem; border-radius: .375rem;
+  transition: color .15s, background .15s; white-space: nowrap;
 }
 .nav-link:hover  { color: #e5e7eb; background: rgba(255,255,255,.07); }
 .nav-link.active { color: #a78bfa; background: rgba(124,106,247,.18); }
 
 /* ── Board ────────────────────────────────────────────────────────────────── */
 .board-wrap {
-  /* Fixed square; chessground needs explicit size at init time */
-  width: var(--board-size, 440px);
-  height: var(--board-size, 440px);
+  width:  min(440px, min(calc(100vw - 2rem), calc(100vh - 260px)));
+  height: min(440px, min(calc(100vw - 2rem), calc(100vh - 260px)));
+  flex-shrink: 0;
+}
+/* Practice board is smaller on mobile */
+.board-wrap-sm {
+  width:  min(380px, calc(100vw - 2rem));
+  height: min(380px, calc(100vw - 2rem));
   flex-shrink: 0;
 }
 
@@ -34,6 +46,23 @@ body { font-family: system-ui, -apple-system, sans-serif; }
 .btn-danger:not(:disabled):hover  { background: rgba(248,113,113,.25); }
 .btn-success { background: rgba(74,222,128,.15);  color: #4ade80; }
 .btn-success:not(:disabled):hover { background: rgba(74,222,128,.25); }
+.btn-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.75rem; height: 1.75rem; border-radius: .35rem; border: none;
+  background: rgba(255,255,255,.07); color: #9ca3af; cursor: pointer;
+  transition: background .15s, color .15s; font-size: .85rem;
+}
+.btn-icon:hover { background: rgba(255,255,255,.13); color: #e5e7eb; }
+
+/* ── Tab buttons ─────────────────────────────────────────────────────────── */
+.tab-btn {
+  padding: .2rem .55rem; border-radius: .3rem; font-size: .75rem;
+  font-weight: 500; background: transparent; color: #9ca3af;
+  border: 1px solid transparent; cursor: pointer;
+  transition: color .15s, background .15s, border-color .15s;
+}
+.tab-btn:hover  { color: #e5e7eb; background: rgba(255,255,255,.06); }
+.tab-btn.active { color: #a78bfa; background: rgba(124,106,247,.15); border-color: rgba(124,106,247,.35); }
 
 /* ── Cards / lists ───────────────────────────────────────────────────────── */
 .mistake-row {
@@ -54,26 +83,63 @@ body { font-family: system-ui, -apple-system, sans-serif; }
 .pill-freq { background: rgba(124,106,247,.18); color: #a78bfa; }
 .pill-ok   { background: rgba(74,222,128,.18);  color: #4ade80; }
 .pill-warn { background: rgba(251,191,36,.18);  color: #fbbf24; }
+.pill-blue { background: rgba(96,165,250,.18);  color: #60a5fa; }
 
 /* ── Drop zone ───────────────────────────────────────────────────────────── */
 .drop-zone {
   border: 2px dashed rgba(255,255,255,.18); border-radius: .6rem;
-  padding: 2rem; text-align: center; cursor: pointer;
+  padding: 1.5rem; text-align: center; cursor: pointer;
   transition: border-color .2s, background .2s;
 }
 .drop-zone:hover, .drop-zone.drag-over {
   border-color: #7c6af7; background: rgba(124,106,247,.07);
 }
 
+/* ── Progress bar ─────────────────────────────────────────────────────────── */
+.progress-track {
+  height: 4px; background: rgba(255,255,255,.08); border-radius: 9999px;
+  overflow: hidden; margin-top: .35rem;
+}
+.progress-fill {
+  height: 100%; background: #7c6af7; border-radius: 9999px;
+  transition: width .4s ease;
+}
+
+/* ── Practice mode ───────────────────────────────────────────────────────── */
+.stat-card {
+  background: #16213e; border: 1px solid rgba(255,255,255,.08);
+  border-radius: .6rem; padding: .75rem 1rem; text-align: center;
+}
+.stat-card .val  { font-size: 1.5rem; font-weight: 700; line-height: 1; }
+.stat-card .lbl  { font-size: .65rem; color: #6b7280; margin-top: .2rem; text-transform: uppercase; letter-spacing: .05em; }
+
+.practice-feedback-correct {
+  animation: flash-green .4s ease;
+}
+.practice-feedback-wrong {
+  animation: flash-red .4s ease;
+}
+@keyframes flash-green {
+  0%   { box-shadow: 0 0 0 0 rgba(74,222,128,.7);  }
+  50%  { box-shadow: 0 0 0 12px rgba(74,222,128,.2); }
+  100% { box-shadow: 0 0 0 0 rgba(74,222,128,0);   }
+}
+@keyframes flash-red {
+  0%   { box-shadow: 0 0 0 0 rgba(248,113,113,.7);  }
+  50%  { box-shadow: 0 0 0 12px rgba(248,113,113,.2); }
+  100% { box-shadow: 0 0 0 0 rgba(248,113,113,0);   }
+}
+
 /* ── Toast ───────────────────────────────────────────────────────────────── */
 .toast {
   pointer-events: auto; background: #16213e;
   border: 1px solid rgba(255,255,255,.12); border-radius: .45rem;
-  padding: .6rem .9rem; font-size: .82rem; max-width: 22rem;
+  padding: .6rem .9rem; font-size: .82rem;
   animation: toast-in .18s ease; display: flex; align-items: center; gap: .45rem;
 }
 .toast.error   { border-color: rgba(248,113,113,.5); color: #fca5a5; }
 .toast.success { border-color: rgba(74,222,128,.5);  color: #86efac; }
+.toast.info    { border-color: rgba(96,165,250,.4);  color: #93c5fd; }
 @keyframes toast-in { from { transform: translateY(.5rem); opacity: 0; } to { opacity: 1; } }
 
 /* ── Spinner ─────────────────────────────────────────────────────────────── */
@@ -84,7 +150,30 @@ body { font-family: system-ui, -apple-system, sans-serif; }
   border-radius: 50%; animation: spin .65s linear infinite;
 }
 
-/* ── Scrollbar ───────────────────────────────────────────────────────────── */
-::-webkit-scrollbar       { width: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 3px; }
+/* ── Keyboard shortcut overlay ───────────────────────────────────────────── */
+.shortcut-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .3rem 0; border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.shortcut-row:last-child { border-bottom: none; }
+.shortcut-row kbd {
+  background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.15);
+  border-radius: .25rem; padding: .1rem .4rem; font-size: .75rem;
+  font-family: monospace; color: #e5e7eb; min-width: 2.5rem; text-align: center;
+}
+.shortcut-row span { color: #9ca3af; font-size: .82rem; }
+
+/* ── Sync config row ─────────────────────────────────────────────────────── */
+.sync-row {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .4rem .6rem; border-radius: .4rem;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07);
+}
+
+/* ── Summary stat strip ──────────────────────────────────────────────────── */
+.summary-strip {
+  display: flex; gap: .75rem; flex-wrap: wrap; padding: .75rem 1rem;
+  background: rgba(255,255,255,.03); border-bottom: 1px solid rgba(255,255,255,.07);
+  font-size: .75rem; color: #6b7280;
+}
+.summary-strip strong { color: #e5e7eb; }

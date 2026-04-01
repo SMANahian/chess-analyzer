@@ -3,7 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Chess Analyzer</title>
+  <title>Chess Analyzer — Fix Your Opening Mistakes</title>
+  <meta name="description" content="Analyze your chess games, discover recurring opening mistakes, and train to fix them with an interactive practice board." />
+  <meta name="theme-color" content="#1a1a2e" />
+
+  <!-- Open Graph -->
+  <meta property="og:title"       content="Chess Analyzer" />
+  <meta property="og:description" content="Find and fix your recurring chess opening mistakes." />
+  <meta property="og:type"        content="website" />
+
+  <!-- Favicon (inline SVG) -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♟</text></svg>" />
+
+  <!-- PWA manifest (inline) -->
+  <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Chess+Analyzer%22%2C%22short_name%22%3A%22Chess%22%2C%22start_url%22%3A%22%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%231a1a2e%22%2C%22theme_color%22%3A%22%231a1a2e%22%7D" />
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -20,7 +33,7 @@
     }
   </script>
 
-  <!-- Chessground CSS only — JS is imported as ESM in app.js -->
+  <!-- Chessground CSS — JS imported as ESM in app.js -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.1.1/assets/chessground.base.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.1.1/assets/chessground.brown.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.1.1/assets/chessground.cburnett.css" />
@@ -29,19 +42,54 @@
 </head>
 <body class="bg-[#1a1a2e] text-gray-100 min-h-screen flex flex-col">
 
-  <nav class="bg-[#16213e] border-b border-white/10 px-5 py-2.5 flex items-center gap-5 shrink-0">
-    <span class="font-bold text-base tracking-tight text-accent">♟ Chess Analyzer</span>
-    <a href="#/"               data-nav="upload"   class="nav-link">Upload</a>
-    <a href="#/analysis/white" data-nav="white"    class="nav-link">White</a>
-    <a href="#/analysis/black" data-nav="black"    class="nav-link">Black</a>
-    <a href="#/mastered"       data-nav="mastered" class="nav-link">Mastered</a>
-    <div id="engine-badge" class="ml-auto text-sm text-gray-400"></div>
+  <!-- Nav -->
+  <nav class="bg-[#16213e] border-b border-white/10 px-4 py-2.5 flex items-center gap-1 shrink-0 relative z-40">
+    <span class="font-bold text-base tracking-tight text-accent mr-3 whitespace-nowrap">♟ Chess Analyzer</span>
+
+    <!-- Desktop nav links -->
+    <div class="hidden sm:flex items-center gap-1 flex-1">
+      <a href="#/"               class="nav-link">Games</a>
+      <a href="#/analysis/white" class="nav-link">White</a>
+      <a href="#/analysis/black" class="nav-link">Black</a>
+      <a href="#/practice"       class="nav-link">Practice</a>
+      <a href="#/mastered"       class="nav-link">Mastered</a>
+    </div>
+
+    <!-- Mobile nav links (horizontal scroll) -->
+    <div class="flex sm:hidden items-center gap-1 flex-1 overflow-x-auto no-scrollbar">
+      <a href="#/"               class="nav-link whitespace-nowrap">Games</a>
+      <a href="#/analysis/white" class="nav-link whitespace-nowrap">White</a>
+      <a href="#/analysis/black" class="nav-link whitespace-nowrap">Black</a>
+      <a href="#/practice"       class="nav-link whitespace-nowrap">Practice</a>
+      <a href="#/mastered"       class="nav-link whitespace-nowrap">Mastered</a>
+    </div>
+
+    <div id="engine-badge" class="ml-auto shrink-0 text-sm text-gray-400"></div>
   </nav>
 
   <main id="app" class="flex-1 flex flex-col overflow-hidden"></main>
-  <div id="toast" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+  <div id="toast" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none max-w-xs"></div>
 
-  <!-- app.js is type=module, imports chessground + chess.js from CDN as ESM -->
+  <!-- Keyboard shortcut overlay -->
+  <div id="shortcut-overlay" class="hidden fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+    <div class="bg-[#16213e] border border-white/15 rounded-xl p-6 max-w-sm w-full shadow-2xl">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-semibold text-base">Keyboard Shortcuts</h3>
+        <button id="shortcut-close" class="text-gray-400 hover:text-white text-xl leading-none">×</button>
+      </div>
+      <div class="space-y-2 text-sm">
+        <div class="shortcut-row"><kbd>← / ↑</kbd><span>Previous mistake</span></div>
+        <div class="shortcut-row"><kbd>→ / ↓</kbd><span>Next mistake</span></div>
+        <div class="shortcut-row"><kbd>Home</kbd><span>First mistake</span></div>
+        <div class="shortcut-row"><kbd>End</kbd><span>Last mistake</span></div>
+        <div class="shortcut-row"><kbd>H</kbd><span>Toggle hint</span></div>
+        <div class="shortcut-row"><kbd>F</kbd><span>Flip board</span></div>
+        <div class="shortcut-row"><kbd>C</kbd><span>Copy FEN</span></div>
+        <div class="shortcut-row"><kbd>?</kbd><span>This overlay</span></div>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="/static/app.js"></script>
 </body>
 </html>

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -12,7 +13,19 @@ from pydantic import BaseModel
 from chess_analyzer import analysis, db, fetcher
 from chess_analyzer.engine import engine_status, install_hint
 
-app = FastAPI(title="Chess Analyzer", docs_url="/api/docs")
+app = FastAPI(
+    title="Chess Analyzer",
+    description="Analyze your chess opening mistakes and train to fix them.",
+    version="2.1.0",
+    docs_url="/api/docs",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 _STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=_STATIC), name="static")
@@ -35,16 +48,19 @@ async def status() -> JSONResponse:
         run = db.latest_run(color)
         pgn = db.get_pgn(color)
         runs[color] = {
-            "pgn_uploaded": pgn is not None,
-            "game_count":   pgn["game_count"] if pgn else 0,
-            "run_status":   run["status"] if run else None,
-            "run_error":    run["error"]  if run else None,
+            "pgn_uploaded":     pgn is not None,
+            "game_count":       pgn["game_count"] if pgn else 0,
+            "run_status":       run["status"] if run else None,
+            "run_error":        run["error"]  if run else None,
+            "run_progress":     run["progress"]       if run else 0,
+            "run_progress_total": run["progress_total"] if run else 0,
         }
     return JSONResponse({
         "engine_ok":   ok,
         "engine_path": msg,
         "engine_hint": install_hint() if not ok else None,
         "colors":      runs,
+        "summary":     db.get_summary(),
     })
 
 
@@ -100,10 +116,12 @@ async def get_analysis(color: str) -> JSONResponse:
     stats    = analysis.compute_stats(mistakes)
     run      = db.latest_run(color)
     return JSONResponse({
-        "mistakes":      mistakes,
-        "stats":         stats,
-        "mastered_count": len(db.get_mastered(color)),
-        "run_status":    run["status"] if run else None,
+        "mistakes":           mistakes,
+        "stats":              stats,
+        "mastered_count":     len(db.get_mastered(color)),
+        "run_status":         run["status"]          if run else None,
+        "run_progress":       run["progress"]        if run else 0,
+        "run_progress_total": run["progress_total"]  if run else 0,
     })
 
 
@@ -153,6 +171,13 @@ async def create_sync_config(body: SyncConfigIn) -> JSONResponse:
     return JSONResponse({"config_id": config_id})
 
 
+@app.delete("/api/sync/{config_id}")
+async def delete_sync_config(config_id: int) -> JSONResponse:
+    if not db.delete_sync_config(config_id):
+        raise HTTPException(404, "Sync config not found")
+    return JSONResponse({"ok": True})
+
+
 @app.post("/api/sync/{config_id}/run", status_code=202)
 async def run_sync(config_id: int) -> JSONResponse:
     config = db.get_sync_config(config_id)
@@ -175,8 +200,32 @@ async def sync_status(config_id: int) -> JSONResponse:
     run = db.latest_sync_run(config_id)
     return JSONResponse({
         "config":     dict(config),
-        "latest_run": run,
+        "latest_run": dict(run) if run else None,
     })
+
+
+# ── Practice sessions ─────────────────────────────────────────────────────
+
+class PracticeSessionIn(BaseModel):
+    color:       str
+    correct:     int
+    total:       int
+    best_streak: int
+
+
+@app.post("/api/practice/session")
+async def save_practice_session(body: PracticeSessionIn) -> JSONResponse:
+    _chk_color(body.color)
+    session_id = db.save_practice_session(
+        body.color, body.correct, body.total, body.best_streak
+    )
+    return JSONResponse({"session_id": session_id})
+
+
+@app.get("/api/practice/history/{color}")
+async def practice_history(color: str) -> JSONResponse:
+    _chk_color(color)
+    return JSONResponse({"history": db.get_practice_history(color)})
 
 
 # ── Data ──────────────────────────────────────────────────────────────────
@@ -193,6 +242,18 @@ async def export_data() -> JSONResponse:
         color: {"mistakes": db.get_mistakes(color), "mastered": db.get_mastered(color)}
         for color in ("white", "black")
     })
+
+
+@app.get("/api/summary")
+async def summary() -> JSONResponse:
+    return JSONResponse(db.get_summary())
+
+
+# ── Health ────────────────────────────────────────────────────────────────
+
+@app.get("/health", include_in_schema=False)
+async def health() -> JSONResponse:
+    return JSONResponse({"status": "ok"})
 
 
 # ── SPA fallback ──────────────────────────────────────────────────────────

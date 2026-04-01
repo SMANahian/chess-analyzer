@@ -22,12 +22,14 @@ CREATE TABLE IF NOT EXISTS pgn_files (
 );
 
 CREATE TABLE IF NOT EXISTS analysis_runs (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    color       TEXT NOT NULL,
-    status      TEXT NOT NULL DEFAULT 'pending',
-    started_at  TEXT,
-    finished_at TEXT,
-    error       TEXT
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    color            TEXT NOT NULL,
+    status           TEXT NOT NULL DEFAULT 'pending',
+    started_at       TEXT,
+    finished_at      TEXT,
+    error            TEXT,
+    progress         INTEGER NOT NULL DEFAULT 0,
+    progress_total   INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS mistakes (
@@ -70,7 +72,23 @@ CREATE TABLE IF NOT EXISTS synced_game_ids (
     added_at TEXT NOT NULL,
     PRIMARY KEY (platform, game_id)
 );
+
+CREATE TABLE IF NOT EXISTS practice_sessions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    color       TEXT NOT NULL,
+    correct     INTEGER NOT NULL DEFAULT 0,
+    total       INTEGER NOT NULL DEFAULT 0,
+    best_streak INTEGER NOT NULL DEFAULT 0,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT
+);
 """
+
+# Migrations for existing databases (safe to run multiple times)
+_MIGRATIONS = [
+    "ALTER TABLE analysis_runs ADD COLUMN progress INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE analysis_runs ADD COLUMN progress_total INTEGER NOT NULL DEFAULT 0",
+]
 
 
 def now_iso() -> str:
@@ -82,8 +100,10 @@ def get_db() -> Generator[sqlite3.Connection, None, None]:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
     try:
         conn.executescript(_SCHEMA)
+        _apply_migrations(conn)
         yield conn
         conn.commit()
     except Exception:
@@ -91,6 +111,15 @@ def get_db() -> Generator[sqlite3.Connection, None, None]:
         raise
     finally:
         conn.close()
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    for sql in _MIGRATIONS:
+        try:
+            conn.execute(sql)
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
 
 # ── PGN files ──────────────────────────────────────────────────────────────
@@ -132,6 +161,14 @@ def finish_run(run_id: int, error: Optional[str] = None) -> None:
         db.execute(
             "UPDATE analysis_runs SET status=?, finished_at=?, error=? WHERE id=?",
             ("error" if error else "done", now_iso(), error, run_id),
+        )
+
+
+def update_run_progress(run_id: int, done: int, total: int) -> None:
+    with get_db() as db:
+        db.execute(
+            "UPDATE analysis_runs SET progress=?, progress_total=? WHERE id=?",
+            (done, total, run_id),
         )
 
 
@@ -219,6 +256,13 @@ def get_sync_config(config_id: int) -> Optional[dict]:
         return dict(row) if row else None
 
 
+def delete_sync_config(config_id: int) -> bool:
+    with get_db() as db:
+        cur = db.execute("DELETE FROM sync_configs WHERE id=?", (config_id,))
+        db.execute("DELETE FROM sync_runs WHERE config_id=?", (config_id,))
+        return cur.rowcount > 0
+
+
 def list_sync_configs() -> list[dict]:
     """Return all sync configs with their latest run status attached."""
     with get_db() as db:
@@ -287,6 +331,27 @@ def record_game_ids(platform: str, color: str, game_ids: list[str]) -> None:
         )
 
 
+# ── Practice sessions ─────────────────────────────────────────────────────
+
+def save_practice_session(color: str, correct: int, total: int, best_streak: int) -> int:
+    with get_db() as db:
+        cur = db.execute(
+            "INSERT INTO practice_sessions (color, correct, total, best_streak, started_at, finished_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (color, correct, total, best_streak, now_iso(), now_iso()),
+        )
+        return cur.lastrowid  # type: ignore[return-value]
+
+
+def get_practice_history(color: str, limit: int = 10) -> list[dict]:
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT * FROM practice_sessions WHERE color=? ORDER BY id DESC LIMIT ?",
+            (color, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 # ── Data management ────────────────────────────────────────────────────────
 
 def clear_all() -> None:
@@ -297,6 +362,34 @@ def clear_all() -> None:
         db.execute("DELETE FROM sync_configs")
         db.execute("DELETE FROM sync_runs")
         db.execute("DELETE FROM synced_game_ids")
+        db.execute("DELETE FROM practice_sessions")
+
+
+# ── Summary stats ──────────────────────────────────────────────────────────
+
+def get_summary() -> dict:
+    with get_db() as db:
+        total_mistakes = db.execute(
+            "SELECT COUNT(*) FROM mistakes WHERE mastered=0"
+        ).fetchone()[0]
+        total_mastered = db.execute(
+            "SELECT COUNT(*) FROM mistakes WHERE mastered=1"
+        ).fetchone()[0]
+        total_games = db.execute(
+            "SELECT COALESCE(SUM(game_count),0) FROM pgn_files"
+        ).fetchone()[0]
+        practice_rows = db.execute(
+            "SELECT SUM(correct) as c, SUM(total) as t, MAX(best_streak) as bs "
+            "FROM practice_sessions"
+        ).fetchone()
+        return {
+            "total_mistakes": total_mistakes,
+            "total_mastered": total_mastered,
+            "total_games":    total_games,
+            "practice_correct": practice_rows["c"] or 0,
+            "practice_total":   practice_rows["t"] or 0,
+            "practice_best_streak": practice_rows["bs"] or 0,
+        }
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
