@@ -1,13 +1,34 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "chess-analyzer"
-version = "2.0.0"
+dynamic = ["version"]
 description = "Analyze your chess opening mistakes and train to fix them"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.8"
+authors = [
+    {name = "S M A Nahian"},
+]
+keywords = ["chess", "opening-analysis", "stockfish", "lichess", "chesscom"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Games/Entertainment :: Board Games",
+]
 dependencies = [
     "fastapi>=0.100",
     "uvicorn[standard]>=0.23",
@@ -16,12 +37,29 @@ dependencies = [
     "requests>=2.28",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "build>=1.2",
+    "twine>=5.1",
+]
+
 [project.scripts]
 chess-analyzer = "chess_analyzer.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/SMANahian/chess-analyzer"
+Repository = "https://github.com/SMANahian/chess-analyzer"
+Issues = "https://github.com/SMANahian/chess-analyzer/issues"
+
+[tool.setuptools]
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["chess_analyzer*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "chess_analyzer.__version__"}
 
 [tool.setuptools.package-data]
 chess_analyzer = ["static/*", "static/**/*"]

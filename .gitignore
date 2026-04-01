@@ -1,5 +1,6 @@
 # Virtualenvs
 /.venv/
+/.pkg-venv/
 /venv/
 /env/
 
@@ -18,21 +19,22 @@ build/
 # Logs and coverage
 *.log
 app.log
+server.log
 .coverage
 htmlcov/
+.pytest_cache/
+.mypy_cache/
+coverage/
 
-# Local data
-/database/
-*.pgn
+# Local app data
+.chess-analyzer/
 *.processing
 
-# Old Flask app leftovers
-/assets/
-/templates/
-/utils/
-app.py
-config.py
-requirements.txt
+# Browser / JS tooling
+node_modules/
+playwright-report/
+test-results/
+.playwright-data/
 
 # Editors / OS
 .DS_Store

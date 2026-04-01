@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import threading
 import time
 import webbrowser
+
+from chess_analyzer import __version__
 
 
 def _open_browser(port: int) -> None:
@@ -21,8 +24,12 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8765, help="Port to listen on (default: 8765)")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
     parser.add_argument("--no-browser", action="store_true", help="Don't open the browser automatically")
-    parser.add_argument("--version", action="version", version="chess-analyzer 2.0.0")
+    parser.add_argument("--dev-mode", action="store_true", help="Enable developer diagnostics and the in-app log view")
+    parser.add_argument("--version", action="version", version=f"chess-analyzer {__version__}")
     args = parser.parse_args()
+
+    if args.dev_mode:
+        os.environ["CHESS_ANALYZER_DEV_MODE"] = "1"
 
     if not args.no_browser:
         t = threading.Thread(target=_open_browser, args=(args.port,), daemon=True)
@@ -35,6 +42,8 @@ def main() -> None:
         sys.exit(1)
 
     print(f"Chess Analyzer running at http://{args.host}:{args.port}")
+    if args.dev_mode:
+        print("Developer mode enabled.")
     print("Press Ctrl+C to stop.")
 
     uvicorn.run(

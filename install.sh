@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Chess Analyzer — installer
-# Usage: curl -sSL https://raw.githubusercontent.com/SMANahian/chess-analyzer/master/install.sh | bash
+# Usage: curl -sSL https://raw.githubusercontent.com/SMANahian/chess-analyzer/main/install.sh | bash
 
 set -euo pipefail
 
-REPO="https://github.com/SMANahian/chess-analyzer"
+PACKAGE_NAME="chess-analyzer"
+REPO_URL="https://github.com/SMANahian/chess-analyzer"
+GIT_REF="${CHESS_ANALYZER_GIT_REF:-main}"
+INSTALL_SOURCE="${CHESS_ANALYZER_INSTALL_SOURCE:-git}"
 BOLD='\033[1m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -15,6 +18,18 @@ info()    { echo -e "${BOLD}[chess-analyzer]${NC} $*"; }
 success() { echo -e "${GREEN}✓${NC} $*"; }
 warn()    { echo -e "${YELLOW}⚠${NC}  $*"; }
 die()     { echo -e "${RED}✕${NC}  $*" >&2; exit 1; }
+
+resolve_install_spec() {
+  if [[ -n "${CHESS_ANALYZER_INSTALL_SPEC:-}" ]]; then
+    echo "$CHESS_ANALYZER_INSTALL_SPEC"
+    return
+  fi
+  if [[ "$INSTALL_SOURCE" == "git" ]]; then
+    echo "git+${REPO_URL}.git@${GIT_REF}"
+    return
+  fi
+  echo "$PACKAGE_NAME"
+}
 
 # ── Check Python ─────────────────────────────────────────────────────────
 
@@ -35,6 +50,7 @@ success "Found $($PYTHON --version)"
 # ── Install package ───────────────────────────────────────────────────────
 
 info "Installing chess-analyzer..."
+INSTALL_SPEC="$(resolve_install_spec)"
 
 USE_PIPX=false
 if command -v pipx &>/dev/null; then
@@ -43,10 +59,11 @@ fi
 
 if $USE_PIPX; then
   info "Installing via pipx (isolated environment)..."
-  pipx install "git+${REPO}.git" --force
+  pipx install "$INSTALL_SPEC" --force
+  pipx ensurepath >/dev/null 2>&1 || true
 else
   info "Installing via pip (user install)..."
-  "$PYTHON" -m pip install --user --quiet "git+${REPO}.git" 2>&1 | tail -5
+  "$PYTHON" -m pip install --user --upgrade "$INSTALL_SPEC"
 fi
 
 # ── Ensure the command is in PATH ─────────────────────────────────────────
@@ -96,7 +113,9 @@ fi
 # ── Check Stockfish ───────────────────────────────────────────────────────
 
 info "Checking for Stockfish..."
-if command -v stockfish &>/dev/null; then
+if [[ -n "${STOCKFISH_PATH:-}" ]]; then
+  success "Using STOCKFISH_PATH=$STOCKFISH_PATH"
+elif command -v stockfish &>/dev/null; then
   success "Stockfish found: $(command -v stockfish)"
 else
   warn "Stockfish not found. The chess engine is required for analysis."
@@ -119,5 +138,5 @@ echo -e "${BOLD}All done!${NC} Run the app with:"
 echo ""
 echo -e "  ${GREEN}chess-analyzer${NC}"
 echo ""
-echo -e "This will start a local server and open ${BOLD}http://localhost:8765${NC} in your browser."
+echo -e "This will start a local server and open ${BOLD}http://127.0.0.1:8765${NC} in your browser."
 echo ""

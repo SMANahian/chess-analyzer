@@ -1,0 +1,9 @@
+include LICENSE
+include README.md
+include install.sh
+include package.json
+include package-lock.json
+include playwright.config.js
+recursive-include chess_analyzer/static *
+recursive-include tests *.py
+recursive-include e2e *.js

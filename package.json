@@ -1,0 +1,16 @@
+{
+  "name": "chess-analyzer",
+  "description": "Browser smoke tests for the Chess Analyzer local app",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:install": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2"
+  }
+}

@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Chess Analyzer — Fix Your Opening Mistakes</title>
   <meta name="description" content="Analyze your chess games, discover recurring opening mistakes, and train to fix them with an interactive practice board." />
-  <meta name="theme-color" content="#1a1a2e" />
+  <meta name="theme-color" content="#07131b" />
 
   <!-- Open Graph -->
   <meta property="og:title"       content="Chess Analyzer" />
@@ -16,54 +16,50 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♟</text></svg>" />
 
   <!-- PWA manifest (inline) -->
-  <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Chess+Analyzer%22%2C%22short_name%22%3A%22Chess%22%2C%22start_url%22%3A%22%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%231a1a2e%22%2C%22theme_color%22%3A%22%231a1a2e%22%7D" />
+  <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Chess+Analyzer%22%2C%22short_name%22%3A%22Chess%22%2C%22start_url%22%3A%22%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%2307131b%22%2C%22theme_color%22%3A%22%2307131b%22%7D" />
 
-  <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            surface: { DEFAULT: '#1a1a2e', 1: '#16213e', 2: '#0f3460' },
-            accent:  { DEFAULT: '#7c6af7', hover: '#6b59e8' },
-          }
-        }
-      }
-    }
+    (() => {
+      const saved = localStorage.getItem('chess-analyzer-theme');
+      const theme = saved === 'light' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = theme;
+      document.documentElement.style.colorScheme = theme;
+    })();
   </script>
 
+  <script src="/static/vendor/tailwindcss.js"></script>
+  <script>tailwind.config = { theme: { extend: {} } }</script>
+
   <!-- Chessground CSS — JS imported as ESM in app.js -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.1.1/assets/chessground.base.css" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.1.1/assets/chessground.brown.css" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.1.1/assets/chessground.cburnett.css" />
+  <link rel="stylesheet" href="/static/vendor/chessground/assets/chessground.base.css" />
+  <link rel="stylesheet" href="/static/vendor/chessground/assets/chessground.brown.css" />
+  <link rel="stylesheet" href="/static/vendor/chessground/assets/chessground.cburnett.css" />
 
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body class="bg-[#1a1a2e] text-gray-100 min-h-screen flex flex-col">
+<body class="min-h-screen flex flex-col">
 
   <!-- Nav -->
-  <nav class="bg-[#16213e] border-b border-white/10 px-4 py-2.5 flex items-center gap-1 shrink-0 relative z-40">
-    <span class="font-bold text-base tracking-tight text-accent mr-3 whitespace-nowrap">♟ Chess Analyzer</span>
+  <nav class="shrink-0 relative">
+    <span class="brand-mark">
+      <em>♟</em>
+      <span class="brand-copy">
+        <strong>Chess Analyzer</strong>
+        <small>Opening review studio</small>
+      </span>
+    </span>
 
-    <!-- Desktop nav links -->
-    <div class="hidden sm:flex items-center gap-1 flex-1">
+    <div class="nav-track no-scrollbar">
       <a href="#/"               class="nav-link">Games</a>
       <a href="#/analysis/white" class="nav-link">White</a>
       <a href="#/analysis/black" class="nav-link">Black</a>
       <a href="#/practice"       class="nav-link">Practice</a>
       <a href="#/mastered"       class="nav-link">Mastered</a>
+      <a href="#/snoozed"        class="nav-link">Snoozed</a>
+      <a href="#/logs"           class="nav-link hidden" id="nav-logs">Logs</a>
     </div>
 
-    <!-- Mobile nav links (horizontal scroll) -->
-    <div class="flex sm:hidden items-center gap-1 flex-1 overflow-x-auto no-scrollbar">
-      <a href="#/"               class="nav-link whitespace-nowrap">Games</a>
-      <a href="#/analysis/white" class="nav-link whitespace-nowrap">White</a>
-      <a href="#/analysis/black" class="nav-link whitespace-nowrap">Black</a>
-      <a href="#/practice"       class="nav-link whitespace-nowrap">Practice</a>
-      <a href="#/mastered"       class="nav-link whitespace-nowrap">Mastered</a>
-    </div>
-
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch theme"></button>
     <div id="engine-badge" class="ml-auto shrink-0 text-sm text-gray-400"></div>
   </nav>
 
