@@ -1,0 +1,90 @@
+*, *::before, *::after { box-sizing: border-box; }
+body { font-family: system-ui, -apple-system, sans-serif; }
+
+/* ── Nav ─────────────────────────────────────────────────────────────────── */
+.nav-link {
+  color: #9ca3af; font-size: .875rem; font-weight: 500;
+  padding: .2rem .5rem; border-radius: .375rem;
+  transition: color .15s, background .15s;
+}
+.nav-link:hover  { color: #e5e7eb; background: rgba(255,255,255,.07); }
+.nav-link.active { color: #a78bfa; background: rgba(124,106,247,.18); }
+
+/* ── Board ────────────────────────────────────────────────────────────────── */
+.board-wrap {
+  /* Fixed square; chessground needs explicit size at init time */
+  width: var(--board-size, 440px);
+  height: var(--board-size, 440px);
+  flex-shrink: 0;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .4rem .85rem; border-radius: .4rem;
+  font-size: .8rem; font-weight: 500; cursor: pointer;
+  transition: opacity .15s, background .15s; border: none;
+}
+.btn:disabled { opacity: .35; cursor: default; }
+.btn-primary { background: #7c6af7; color: #fff; }
+.btn-primary:not(:disabled):hover { background: #6b59e8; }
+.btn-ghost   { background: rgba(255,255,255,.08); color: #e5e7eb; }
+.btn-ghost:not(:disabled):hover   { background: rgba(255,255,255,.13); }
+.btn-danger  { background: rgba(248,113,113,.15); color: #f87171; }
+.btn-danger:not(:disabled):hover  { background: rgba(248,113,113,.25); }
+.btn-success { background: rgba(74,222,128,.15);  color: #4ade80; }
+.btn-success:not(:disabled):hover { background: rgba(74,222,128,.25); }
+
+/* ── Cards / lists ───────────────────────────────────────────────────────── */
+.mistake-row {
+  padding: .55rem .75rem; border-radius: .4rem; cursor: pointer;
+  display: flex; align-items: center; gap: .5rem;
+  border: 1px solid transparent;
+  transition: background .12s, border-color .12s;
+}
+.mistake-row:hover  { background: rgba(255,255,255,.05); }
+.mistake-row.active { background: rgba(124,106,247,.15); border-color: rgba(124,106,247,.4); }
+
+/* ── Pill badges ─────────────────────────────────────────────────────────── */
+.pill {
+  display: inline-flex; align-items: center; padding: .1rem .45rem;
+  border-radius: 9999px; font-size: .7rem; font-weight: 600; white-space: nowrap;
+}
+.pill-cp   { background: rgba(248,113,113,.18); color: #f87171; }
+.pill-freq { background: rgba(124,106,247,.18); color: #a78bfa; }
+.pill-ok   { background: rgba(74,222,128,.18);  color: #4ade80; }
+.pill-warn { background: rgba(251,191,36,.18);  color: #fbbf24; }
+
+/* ── Drop zone ───────────────────────────────────────────────────────────── */
+.drop-zone {
+  border: 2px dashed rgba(255,255,255,.18); border-radius: .6rem;
+  padding: 2rem; text-align: center; cursor: pointer;
+  transition: border-color .2s, background .2s;
+}
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: #7c6af7; background: rgba(124,106,247,.07);
+}
+
+/* ── Toast ───────────────────────────────────────────────────────────────── */
+.toast {
+  pointer-events: auto; background: #16213e;
+  border: 1px solid rgba(255,255,255,.12); border-radius: .45rem;
+  padding: .6rem .9rem; font-size: .82rem; max-width: 22rem;
+  animation: toast-in .18s ease; display: flex; align-items: center; gap: .45rem;
+}
+.toast.error   { border-color: rgba(248,113,113,.5); color: #fca5a5; }
+.toast.success { border-color: rgba(74,222,128,.5);  color: #86efac; }
+@keyframes toast-in { from { transform: translateY(.5rem); opacity: 0; } to { opacity: 1; } }
+
+/* ── Spinner ─────────────────────────────────────────────────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  display: inline-block; width: 1em; height: 1em;
+  border: 2px solid currentColor; border-top-color: transparent;
+  border-radius: 50%; animation: spin .65s linear infinite;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 3px; }

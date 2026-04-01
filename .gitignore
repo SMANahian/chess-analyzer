@@ -1,9 +1,19 @@
 # Virtualenvs
 /.venv/
+/venv/
+/env/
 
 # Python artifacts
 __pycache__/
 *.py[cod]
+*.pyo
+
+# Package build / dev install artifacts
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
 
 # Logs and coverage
 *.log
@@ -15,6 +25,14 @@ htmlcov/
 /database/
 *.pgn
 *.processing
+
+# Old Flask app leftovers
+/assets/
+/templates/
+/utils/
+app.py
+config.py
+requirements.txt
 
 # Editors / OS
 .DS_Store

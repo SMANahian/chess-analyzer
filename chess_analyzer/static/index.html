@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chess Analyzer</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            surface: { DEFAULT: '#1a1a2e', 1: '#16213e', 2: '#0f3460' },
+            accent:  { DEFAULT: '#7c6af7', hover: '#6b59e8' },
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Chessground CSS only — JS is imported as ESM in app.js -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.1.1/assets/chessground.base.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.1.1/assets/chessground.brown.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.1.1/assets/chessground.cburnett.css" />
+
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="bg-[#1a1a2e] text-gray-100 min-h-screen flex flex-col">
+
+  <nav class="bg-[#16213e] border-b border-white/10 px-5 py-2.5 flex items-center gap-5 shrink-0">
+    <span class="font-bold text-base tracking-tight text-accent">♟ Chess Analyzer</span>
+    <a href="#/"               data-nav="upload"   class="nav-link">Upload</a>
+    <a href="#/analysis/white" data-nav="white"    class="nav-link">White</a>
+    <a href="#/analysis/black" data-nav="black"    class="nav-link">Black</a>
+    <a href="#/mastered"       data-nav="mastered" class="nav-link">Mastered</a>
+    <div id="engine-badge" class="ml-auto text-sm text-gray-400"></div>
+  </nav>
+
+  <main id="app" class="flex-1 flex flex-col overflow-hidden"></main>
+  <div id="toast" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- app.js is type=module, imports chessground + chess.js from CDN as ESM -->
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
