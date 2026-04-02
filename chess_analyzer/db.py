@@ -13,7 +13,7 @@ from typing import Any, Generator, Optional
 DATA_DIR = Path(os.environ.get("CHESS_ANALYZER_DATA", Path.home() / ".chess-analyzer"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "chess_analyzer.db"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 _DB_TIMEOUT_SECONDS = float(os.environ.get("SQLITE_TIMEOUT_SECONDS", "15"))
 _INIT_LOCK = threading.Lock()
 _INITIALIZED_DB_PATH: Optional[Path] = None
@@ -156,6 +156,41 @@ CREATE TABLE IF NOT EXISTS app_settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS opponents (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    name              TEXT NOT NULL,
+    lichess_username   TEXT,
+    chesscom_username  TEXT,
+    last_synced_at    TEXT,
+    created_at        TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS opponent_sync_runs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    opponent_id  INTEGER NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'running',
+    games_new    INTEGER DEFAULT 0,
+    started_at   TEXT NOT NULL,
+    finished_at  TEXT,
+    error        TEXT,
+    details      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS opponent_mistakes (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    opponent_id  INTEGER NOT NULL,
+    color        TEXT NOT NULL,
+    fen          TEXT NOT NULL,
+    user_move    TEXT NOT NULL,
+    top_moves    TEXT NOT NULL DEFAULT '[]',
+    avg_cp_loss  INTEGER NOT NULL,
+    pair_count   INTEGER NOT NULL,
+    opening_eco  TEXT,
+    opening_name TEXT,
+    move_list    TEXT,
+    analyzed_at  TEXT NOT NULL
+);
 """
 
 _MIGRATIONS = [
@@ -190,6 +225,8 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_mistake_attempts_mistake_id ON mistake_attempts(mistake_id, attempted_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_mistakes_sm2_due ON mistakes(color, mastered, snoozed, sm2_due_at)",
     "CREATE INDEX IF NOT EXISTS idx_mistakes_color_practice ON mistakes(color, mastered, snoozed, sm2_reps)",
+    "CREATE INDEX IF NOT EXISTS idx_opponent_mistakes_opp ON opponent_mistakes(opponent_id, color, pair_count DESC, avg_cp_loss DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_opponent_sync_runs_opp ON opponent_sync_runs(opponent_id, id DESC)",
 ]
 
 
@@ -305,6 +342,16 @@ def _recover_incomplete_jobs(conn: sqlite3.Connection) -> None:
         """,
         (finished_at, _INTERRUPTED_SYNC_ERROR),
     ).rowcount
+    conn.execute(
+        """
+        UPDATE opponent_sync_runs
+        SET status='error',
+            finished_at=COALESCE(finished_at, ?),
+            error=COALESCE(NULLIF(error, ''), ?)
+        WHERE status='running'
+        """,
+        (finished_at, _INTERRUPTED_SYNC_ERROR),
+    )
     if analysis_updated:
         conn.execute(
             "INSERT INTO app_logs (created_at, level, scope, message, details) VALUES (?,?,?,?,?)",
@@ -1390,6 +1437,191 @@ def reset_runtime_state() -> None:
     global _INITIALIZED_DB_PATH
     with _INIT_LOCK:
         _INITIALIZED_DB_PATH = None
+
+
+# ── Opponents ──────────────────────────────────────────────────────────────
+
+def create_opponent(
+    name: str,
+    lichess_username: Optional[str] = None,
+    chesscom_username: Optional[str] = None,
+) -> int:
+    with get_db() as db:
+        cur = db.execute(
+            "INSERT INTO opponents (name, lichess_username, chesscom_username, created_at) VALUES (?,?,?,?)",
+            (name.strip(), lichess_username or None, chesscom_username or None, now_iso()),
+        )
+        return cur.lastrowid  # type: ignore[return-value]
+
+
+def get_opponent(opponent_id: int) -> Optional[dict[str, Any]]:
+    with get_db() as db:
+        row = db.execute("SELECT * FROM opponents WHERE id=?", (opponent_id,)).fetchone()
+        if not row:
+            return None
+        opp = dict(row)
+        run_row = db.execute(
+            "SELECT * FROM opponent_sync_runs WHERE opponent_id=? ORDER BY id DESC LIMIT 1",
+            (opponent_id,),
+        ).fetchone()
+        opp["latest_sync_run"] = _row_to_sync_run(run_row) if run_row else None
+        return opp
+
+
+def list_opponents() -> list[dict[str, Any]]:
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM opponents ORDER BY name ASC").fetchall()
+        result = []
+        for row in rows:
+            opp = dict(row)
+            run_row = db.execute(
+                "SELECT * FROM opponent_sync_runs WHERE opponent_id=? ORDER BY id DESC LIMIT 1",
+                (opp["id"],),
+            ).fetchone()
+            opp["latest_sync_run"] = _row_to_sync_run(run_row) if run_row else None
+            white_count = db.execute(
+                "SELECT COUNT(*) FROM opponent_mistakes WHERE opponent_id=? AND color='white'",
+                (opp["id"],),
+            ).fetchone()[0]
+            black_count = db.execute(
+                "SELECT COUNT(*) FROM opponent_mistakes WHERE opponent_id=? AND color='black'",
+                (opp["id"],),
+            ).fetchone()[0]
+            opp["mistake_count_white"] = int(white_count)
+            opp["mistake_count_black"] = int(black_count)
+            result.append(opp)
+        return result
+
+
+def update_opponent(
+    opponent_id: int,
+    name: str,
+    lichess_username: Optional[str],
+    chesscom_username: Optional[str],
+) -> bool:
+    with get_db() as db:
+        cur = db.execute(
+            "UPDATE opponents SET name=?, lichess_username=?, chesscom_username=? WHERE id=?",
+            (name.strip(), lichess_username or None, chesscom_username or None, opponent_id),
+        )
+        return cur.rowcount > 0
+
+
+def delete_opponent(opponent_id: int) -> bool:
+    with get_db() as db:
+        db.execute("DELETE FROM opponent_mistakes WHERE opponent_id=?", (opponent_id,))
+        db.execute("DELETE FROM opponent_sync_runs WHERE opponent_id=?", (opponent_id,))
+        cur = db.execute("DELETE FROM opponents WHERE id=?", (opponent_id,))
+        return cur.rowcount > 0
+
+
+def update_opponent_last_synced(opponent_id: int) -> None:
+    with get_db() as db:
+        db.execute(
+            "UPDATE opponents SET last_synced_at=? WHERE id=?",
+            (now_iso(), opponent_id),
+        )
+
+
+# ── Opponent sync runs ────────────────────────────────────────────────────
+
+def start_opponent_sync_run(opponent_id: int) -> int:
+    with get_db() as db:
+        cur = db.execute(
+            "INSERT INTO opponent_sync_runs (opponent_id, status, started_at) VALUES (?,?,?)",
+            (opponent_id, "running", now_iso()),
+        )
+        return cur.lastrowid  # type: ignore[return-value]
+
+
+def finish_opponent_sync_run(
+    run_id: int,
+    *,
+    games_new: int = 0,
+    error: Optional[str] = None,
+    details: Optional[dict[str, Any]] = None,
+) -> None:
+    status = "error" if error else "done"
+    with get_db() as db:
+        db.execute(
+            "UPDATE opponent_sync_runs SET status=?, games_new=?, finished_at=?, error=?, details=? WHERE id=?",
+            (
+                status,
+                games_new,
+                now_iso(),
+                error,
+                json.dumps(details) if details else None,
+                run_id,
+            ),
+        )
+
+
+def update_opponent_sync_run(run_id: int, *, details: dict[str, Any]) -> None:
+    with get_db() as db:
+        db.execute(
+            "UPDATE opponent_sync_runs SET details=? WHERE id=?",
+            (json.dumps(details), run_id),
+        )
+
+
+def latest_opponent_sync_run(opponent_id: int) -> Optional[dict[str, Any]]:
+    with get_db() as db:
+        row = db.execute(
+            "SELECT * FROM opponent_sync_runs WHERE opponent_id=? ORDER BY id DESC LIMIT 1",
+            (opponent_id,),
+        ).fetchone()
+        return _row_to_sync_run(row) if row else None
+
+
+# ── Opponent mistakes ─────────────────────────────────────────────────────
+
+def replace_opponent_mistakes(opponent_id: int, color: str, items: list[dict[str, Any]]) -> None:
+    ts = now_iso()
+    with get_db() as db:
+        db.execute(
+            "DELETE FROM opponent_mistakes WHERE opponent_id=? AND color=?",
+            (opponent_id, color),
+        )
+        if items:
+            db.executemany(
+                """INSERT INTO opponent_mistakes
+                   (opponent_id, color, fen, user_move, top_moves, avg_cp_loss, pair_count,
+                    opening_eco, opening_name, move_list, analyzed_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                [
+                    (
+                        opponent_id,
+                        color,
+                        m["fen"],
+                        m["user_move"],
+                        json.dumps(m.get("top_moves") or []),
+                        int(m["avg_cp_loss"]),
+                        int(m["pair_count"]),
+                        m.get("opening_eco"),
+                        m.get("opening_name"),
+                        m.get("move_list"),
+                        ts,
+                    )
+                    for m in items
+                ],
+            )
+
+
+def get_opponent_mistakes(opponent_id: int, color: Optional[str] = None) -> list[dict[str, Any]]:
+    with get_db() as db:
+        if color:
+            rows = db.execute(
+                "SELECT * FROM opponent_mistakes WHERE opponent_id=? AND color=? "
+                "ORDER BY pair_count DESC, avg_cp_loss DESC",
+                (opponent_id, color),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT * FROM opponent_mistakes WHERE opponent_id=? "
+                "ORDER BY color ASC, pair_count DESC, avg_cp_loss DESC",
+                (opponent_id,),
+            ).fetchall()
+        return [_row_to_opponent_mistake(r) for r in rows]
     conn = getattr(_THREAD_LOCAL, "conn", None)
     if conn is not None:
         _close_connection(conn)
@@ -1443,6 +1675,12 @@ def _row_to_mistake(row: sqlite3.Row) -> dict[str, Any]:
     data["top_moves"] = json.loads(data["top_moves"])
     data["mastered"] = bool(data.get("mastered"))
     data["snoozed"] = bool(data.get("snoozed"))
+    return data
+
+
+def _row_to_opponent_mistake(row: sqlite3.Row) -> dict[str, Any]:
+    data = dict(row)
+    data["top_moves"] = json.loads(data.get("top_moves") or "[]")
     return data
 
 

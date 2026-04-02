@@ -42,9 +42,20 @@ const ROUTES = {
   '/analysis/black': () => renderAnalysis('black'),
   '/practice': renderPractice,
   '/openings': renderOpenings,
+  '/prep': renderPrep,
   '/mastered': renderMastered,
   '/snoozed': renderSnoozed,
   '/logs': renderLogs,
+};
+
+const Prep = {
+  opponents: [],
+  detail: null,       // current opponent full data
+  mistakes: null,     // {white, black, white_count, black_count}
+  color: 'white',
+  idx: 0,
+  ground: null,
+  showForm: false,
 };
 
 window.addEventListener('hashchange', route);
@@ -59,6 +70,17 @@ window.addEventListener('load', async () => {
 
 function route() {
   const hash = location.hash.replace(/^#/, '') || '/';
+
+  // Prep detail route: #/prep/123
+  const prepMatch = hash.match(/^\/prep\/(\d+)$/);
+  if (prepMatch) {
+    document.querySelectorAll('.nav-link').forEach(link =>
+      link.classList.toggle('active', link.getAttribute('href') === '#/prep')
+    );
+    renderPrepDetail(parseInt(prepMatch[1], 10));
+    return;
+  }
+
   document.querySelectorAll('.nav-link').forEach(link =>
     link.classList.toggle('active', link.getAttribute('href') === `#${hash}`)
   );
@@ -346,6 +368,19 @@ function renderGames() {
         toast(err.message, 'error');
       }
     });
+    document.getElementById(`threshold-select-${color}`)?.addEventListener('change', async evt => {
+      try {
+        await api('PUT', '/settings/mistake-threshold', { threshold_cp: Number(evt.target.value) });
+        toast(`Mistake threshold set to ${evt.target.value}cp`, 'success');
+        // sync the other color's select too
+        const other = color === 'white' ? 'black' : 'white';
+        const otherSel = document.getElementById(`threshold-select-${other}`);
+        if (otherSel) otherSel.value = evt.target.value;
+        if (S.status) S.status.mistake_threshold_cp = Number(evt.target.value);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
   });
 
   document.querySelectorAll('[data-toggle-opts]').forEach(btn =>
@@ -455,6 +490,12 @@ function analysisStatusBlock(color, info) {
             <option value="6"  ${(S.status?.analysis_depth || 6) === 6  ? 'selected' : ''}>Quick (depth 6)</option>
             <option value="10" ${(S.status?.analysis_depth || 6) === 10 ? 'selected' : ''}>Standard (depth 10)</option>
             <option value="16" ${(S.status?.analysis_depth || 6) === 16 ? 'selected' : ''}>Deep (depth 16)</option>
+          </select>
+          <select class="sel field-sm" id="threshold-select-${color}" title="CP loss threshold — lower = catch more mistakes">
+            <option value="80"  ${(S.status?.mistake_threshold_cp || 120) === 80  ? 'selected' : ''}>Precise (80cp)</option>
+            <option value="120" ${(S.status?.mistake_threshold_cp || 120) === 120 ? 'selected' : ''}>Standard (120cp)</option>
+            <option value="150" ${(S.status?.mistake_threshold_cp || 120) === 150 ? 'selected' : ''}>Lenient (150cp)</option>
+            <option value="200" ${(S.status?.mistake_threshold_cp || 120) === 200 ? 'selected' : ''}>Coarse (200cp)</option>
           </select>
           <button id="btn-analyze-${color}" class="btn btn-primary btn-sm" ${run === 'running' || run === 'queued' ? 'disabled' : ''}>
             ${actionLabel}
@@ -2450,4 +2491,388 @@ function buildSM2Queue(mistakes) {
 /** Fire-and-forget: record a practice attempt and advance SM-2. */
 function recordAttempt(mistakeId, correct) {
   POST('/practice/attempt', { mistake_id: mistakeId, correct }).catch(() => {});
+}
+
+// ── Opponent Prep ──────────────────────────────────────────────────────────
+
+async function renderPrep() {
+  try {
+    const data = await GET('/opponents');
+    Prep.opponents = data.opponents || [];
+  } catch {
+    Prep.opponents = [];
+  }
+
+  setApp(`
+    <div class="page" id="prep-view">
+      <div class="page-header">
+        <h1>Opponent Prep</h1>
+        <button id="btn-new-opp" class="btn btn-primary">+ Add opponent</button>
+      </div>
+
+      <div id="opp-add-form" class="opp-add-form hidden" style="margin-bottom:16px">
+        <h3>New opponent</h3>
+        <div class="opp-form-row">
+          <input id="opp-name" class="field" placeholder="Name (e.g. Magnus)" />
+        </div>
+        <div class="opp-form-row">
+          <input id="opp-lichess" class="field field-sm" placeholder="Lichess username (optional)" />
+          <input id="opp-chesscom" class="field field-sm" placeholder="Chess.com username (optional)" />
+        </div>
+        <div style="display:flex;gap:8px">
+          <button id="btn-save-opp" class="btn btn-primary">Save</button>
+          <button id="btn-cancel-opp" class="btn btn-ghost">Cancel</button>
+        </div>
+      </div>
+
+      ${Prep.opponents.length === 0 ? `
+        <div class="empty">
+          <p>No opponents added yet.</p>
+          <p>Add an opponent to fetch their games and find their opening weaknesses.</p>
+        </div>
+      ` : `
+        <div class="opp-list">
+          ${Prep.opponents.map(oppRow).join('')}
+        </div>
+      `}
+    </div>
+  `);
+
+  document.getElementById('btn-new-opp').addEventListener('click', () => {
+    document.getElementById('opp-add-form').classList.toggle('hidden');
+  });
+  document.getElementById('btn-cancel-opp').addEventListener('click', () => {
+    document.getElementById('opp-add-form').classList.add('hidden');
+  });
+  document.getElementById('btn-save-opp').addEventListener('click', doCreateOpponent);
+
+  document.querySelectorAll('[data-opp-sync]').forEach(btn =>
+    btn.addEventListener('click', evt => {
+      evt.stopPropagation();
+      doSyncOpponent(Number(btn.dataset.oppSync));
+    })
+  );
+  document.querySelectorAll('[data-opp-del]').forEach(btn =>
+    btn.addEventListener('click', evt => {
+      evt.stopPropagation();
+      doDeleteOpponent(Number(btn.dataset.oppDel));
+    })
+  );
+  document.querySelectorAll('[data-opp-nav]').forEach(el =>
+    el.addEventListener('click', () => location.hash = `#/prep/${el.dataset.oppNav}`)
+  );
+}
+
+function oppRow(opp) {
+  const run = opp.latest_sync_run;
+  const running = run?.status === 'running';
+  const initials = opp.name.trim().slice(0, 2).toUpperCase();
+  const platforms = [
+    opp.lichess_username ? `⚡ ${esc(opp.lichess_username)}` : '',
+    opp.chesscom_username ? `♟ ${esc(opp.chesscom_username)}` : '',
+  ].filter(Boolean).join(' · ');
+  const wCount = opp.mistake_count_white || 0;
+  const bCount = opp.mistake_count_black || 0;
+  const mistakeInfo = (wCount + bCount) > 0
+    ? `${wCount} white · ${bCount} black mistakes`
+    : opp.last_synced_at ? 'No mistakes found' : 'Not yet analyzed';
+  const syncedInfo = opp.last_synced_at ? `· Synced ${timeAgo(opp.last_synced_at)}` : '';
+
+  return `
+    <div class="opp-row" data-opp-nav="${opp.id}">
+      <div class="opp-avatar">${esc(initials)}</div>
+      <div class="opp-info">
+        <div class="opp-name">${esc(opp.name)}</div>
+        <div class="opp-meta">${platforms} ${syncedInfo}</div>
+        <div class="opp-meta">${mistakeInfo}
+          ${running ? `<span class="badge badge-blue" style="margin-left:6px">Syncing…</span>` : ''}
+          ${run?.status === 'error' ? `<span class="badge badge-red" style="margin-left:6px" title="${esc(run.error||'')}">Error</span>` : ''}
+        </div>
+      </div>
+      <div class="opp-actions">
+        <button class="btn btn-secondary btn-sm" data-opp-sync="${opp.id}" ${running ? 'disabled' : ''}>
+          ${running ? '<span class="spinner"></span>' : '↺ Sync'}
+        </button>
+        <button class="btn-icon" data-opp-del="${opp.id}" title="Delete opponent">✕</button>
+      </div>
+    </div>
+  `;
+}
+
+async function doCreateOpponent() {
+  const name = document.getElementById('opp-name')?.value.trim();
+  const lichess = document.getElementById('opp-lichess')?.value.trim();
+  const chesscom = document.getElementById('opp-chesscom')?.value.trim();
+  if (!name) { toast('Enter a name', 'error'); return; }
+  if (!lichess && !chesscom) { toast('Enter at least one username', 'error'); return; }
+  try {
+    const result = await POST('/opponents', { name, lichess_username: lichess || null, chesscom_username: chesscom || null });
+    toast(`${name} added`, 'success');
+    await doSyncOpponent(result.opponent_id, false);
+    renderPrep();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function doSyncOpponent(opponentId, notify = true) {
+  try {
+    await POST(`/opponents/${opponentId}/sync`, { max_games: 500 });
+    if (notify) toast('Syncing opponent games…', 'info');
+    renderPrep();
+    pollOpponentSync(opponentId);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function doDeleteOpponent(opponentId) {
+  const opp = Prep.opponents.find(o => o.id === opponentId);
+  if (!confirm(`Delete ${opp?.name || 'this opponent'} and all their data?`)) return;
+  try {
+    await DEL(`/opponents/${opponentId}`);
+    toast('Opponent deleted', 'success');
+    renderPrep();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function pollOpponentSync(opponentId) {
+  const key = `opp-${opponentId}`;
+  if (S.pollIds[key]) clearInterval(S.pollIds[key]);
+  S.pollIds[key] = setInterval(async () => {
+    try {
+      const data = await GET(`/opponents/${opponentId}/status`);
+      const run = data.latest_run;
+      const hash = location.hash.replace(/^#/, '') || '/';
+      if (hash === '/prep') renderPrep();
+      else if (hash === `/prep/${opponentId}`) renderPrepDetail(opponentId);
+      if (!run || run.status !== 'running') {
+        clearInterval(S.pollIds[key]);
+        delete S.pollIds[key];
+        if (run?.status === 'done') {
+          toast(`Sync complete: ${run.games_new} games fetched`, 'success');
+          if (hash === '/prep') renderPrep();
+          else if (hash === `/prep/${opponentId}`) renderPrepDetail(opponentId);
+        } else if (run?.status === 'error') {
+          toast(run.error || 'Sync failed', 'error');
+        }
+      }
+    } catch { /* ignore */ }
+  }, 2500);
+}
+
+async function renderPrepDetail(opponentId) {
+  // Load opponent + mistakes
+  try {
+    const [oppData, mistakeData] = await Promise.all([
+      GET(`/opponents/${opponentId}`),
+      GET(`/opponents/${opponentId}/mistakes`),
+    ]);
+    Prep.detail = oppData.opponent;
+    Prep.mistakes = mistakeData;
+    Prep.idx = 0;
+  } catch (err) {
+    setApp(`<div class="page"><div class="empty"><p>Failed to load opponent data.</p></div></div>`);
+    return;
+  }
+
+  const opp = Prep.detail;
+  const run = opp.latest_sync_run;
+  const running = run?.status === 'running';
+  const mistakes = Prep.mistakes[Prep.color] || [];
+
+  setApp(`
+    <div class="page" id="prep-detail-view">
+      <div class="prep-detail-header">
+        <button class="btn btn-ghost prep-back-btn" id="prep-back">← Back</button>
+        <div class="prep-detail-title">
+          <h1>${esc(opp.name)}</h1>
+          <p>${[
+            opp.lichess_username ? `⚡ ${esc(opp.lichess_username)}` : '',
+            opp.chesscom_username ? `♟ ${esc(opp.chesscom_username)}` : '',
+          ].filter(Boolean).join(' · ')}
+          ${opp.last_synced_at ? `· Synced ${timeAgo(opp.last_synced_at)}` : '· Not yet synced'}</p>
+        </div>
+        <button id="prep-sync-btn" class="btn btn-secondary btn-sm" ${running ? 'disabled' : ''}>
+          ${running ? '<span class="spinner"></span> Syncing' : '↺ Re-sync'}
+        </button>
+      </div>
+
+      ${running ? `
+        <div class="warning-banner" style="margin-bottom:16px">
+          Fetching and analyzing ${esc(opp.name)}'s games… results will appear when done.
+        </div>
+      ` : ''}
+
+      <div class="analysis-metrics" style="margin-bottom:16px">
+        ${metricCard(Prep.mistakes.white_count || 0, 'White mistakes', '')}
+        ${metricCard(Prep.mistakes.black_count || 0, 'Black mistakes', '')}
+        ${metricCard(
+          mistakes.length ? Math.round(mistakes.reduce((s, m) => s + m.avg_cp_loss, 0) / mistakes.length) + 'cp' : '—',
+          'Avg loss', ''
+        )}
+      </div>
+
+      <div class="prep-color-tabs">
+        <button class="prep-color-tab ${Prep.color === 'white' ? 'active' : ''}" data-prep-color="white">♔ As White</button>
+        <button class="prep-color-tab ${Prep.color === 'black' ? 'active' : ''}" data-prep-color="black">♚ As Black</button>
+      </div>
+
+      ${mistakes.length === 0 ? `
+        <div class="empty">
+          <p>${opp.last_synced_at ? `No ${Prep.color} mistakes found for ${esc(opp.name)}.` : `Sync ${esc(opp.name)}'s games to find their weaknesses.`}</p>
+        </div>
+      ` : `
+        <div class="prep-grid">
+          <div class="list-panel">
+            <div class="list-panel-head">
+              <h2>Weaknesses</h2>
+              <span id="prep-count" class="badge badge-default">${mistakes.length}</span>
+            </div>
+            <div class="mistake-list" id="prep-mlist">
+              ${mistakes.map((m, i) => prepMistakeRow(m, i)).join('')}
+            </div>
+          </div>
+          <div>
+            <div class="board-card">
+              <div id="prep-board-wrap" class="board-wrap"></div>
+            </div>
+            <div class="detail-card" id="prep-detail"></div>
+          </div>
+        </div>
+      `}
+    </div>
+  `);
+
+  document.getElementById('prep-back').addEventListener('click', () => { location.hash = '#/prep'; });
+  document.getElementById('prep-sync-btn').addEventListener('click', () => doSyncOpponent(opponentId));
+
+  document.querySelectorAll('[data-prep-color]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      Prep.color = btn.dataset.prepColor;
+      Prep.idx = 0;
+      renderPrepDetail(opponentId);
+    })
+  );
+
+  document.querySelectorAll('[data-prep-i]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      Prep.idx = Number(btn.dataset.prepI);
+      selectPrepMistake(opponentId);
+    })
+  );
+
+  if (mistakes.length > 0) {
+    selectPrepMistake(opponentId, true);
+  }
+}
+
+function prepMistakeRow(m, i) {
+  const severity = severityData(m.avg_cp_loss);
+  const san = uciToSan(m.fen, m.user_move);
+  return `
+    <button class="mistake-row ${i === Prep.idx ? 'active' : ''}" data-prep-i="${i}">
+      <span class="mistake-rank">${i + 1}</span>
+      <div class="mistake-copy">
+        <span class="mistake-move">${esc(san)} <span class="pill ${severity.pill}">${severity.label}</span></span>
+        <span class="mistake-opening">${esc(m.opening_name || 'Unknown opening')}${m.opening_eco ? ` · ${esc(m.opening_eco)}` : ''}</span>
+      </div>
+      <div class="mistake-meta">
+        <span class="pill pill-cp">−${m.avg_cp_loss}cp</span>
+        <span class="pill pill-freq">${m.pair_count}×</span>
+      </div>
+    </button>
+  `;
+}
+
+function selectPrepMistake(_opponentId, init = false) {
+  const mistakes = Prep.mistakes?.[Prep.color] || [];
+  const mistake = mistakes[Prep.idx];
+  if (!mistake) return;
+
+  // Highlight active row
+  document.querySelectorAll('[data-prep-i]').forEach((el, i) =>
+    el.classList.toggle('active', i === Prep.idx)
+  );
+
+  const severity = severityData(mistake.avg_cp_loss);
+  const san = uciToSan(mistake.fen, mistake.user_move);
+  const topSans = (mistake.top_moves || []).slice(0, 3).map(mv => ({
+    uci: mv, san: uciToSan(mistake.fen, mv),
+  }));
+  const sans = moveListToSan(mistake.move_list);
+
+  const detail = document.getElementById('prep-detail');
+  if (detail) {
+    detail.innerHTML = `
+      <div class="detail-stack">
+        <div class="detail-head">
+          <div>
+            <div class="detail-move">${esc(san)}</div>
+            <div class="detail-sub">Played ${mistake.pair_count}× · recurring mistake</div>
+          </div>
+          <span class="pill ${severity.pill}">${severity.label}</span>
+        </div>
+        ${mistake.opening_name ? `
+          <div class="detail-opening">
+            ${mistake.opening_eco ? `<span class="eco">${esc(mistake.opening_eco)}</span>` : ''}
+            ${esc(mistake.opening_name)}
+          </div>` : ''}
+        ${sans.length ? `<div class="moves-path">${formatMoveList(sans)}</div>` : ''}
+        <div class="detail-metrics">
+          <div class="dm"><span>Cp loss</span><strong>−${mistake.avg_cp_loss}</strong></div>
+          <div class="dm"><span>Frequency</span><strong>${mistake.pair_count}×</strong></div>
+        </div>
+        <div>
+          <p class="section-head">Better moves</p>
+          <div class="move-chips">
+            ${topSans.map(mv => `<span class="move-chip">${esc(mv.san)}</span>`).join('')}
+          </div>
+        </div>
+        <div class="detail-actions" style="margin-top:8px">
+          <a href="https://lichess.org/analysis/${encodeURIComponent(mistake.fen)}" target="_blank" rel="noopener"
+             class="btn btn-secondary btn-sm">Analyze on Lichess</a>
+        </div>
+      </div>
+    `;
+  }
+
+  // Board
+  const wrap = document.getElementById('prep-board-wrap');
+  if (!wrap) return;
+
+  const chess = new Chess();
+  try { chess.load(mistake.fen); } catch { return; }
+
+  const orientation = Prep.color === 'white' ? 'black' : 'white'; // opponent's color flipped for prep
+  const playedMove = mistake.user_move;
+  const bestMove = mistake.top_moves?.[0];
+
+  const shapes = [];
+  if (playedMove && playedMove.length >= 4) {
+    shapes.push({ orig: playedMove.slice(0, 2), dest: playedMove.slice(2, 4), brush: 'red' });
+  }
+  if (bestMove && bestMove.length >= 4 && bestMove !== playedMove) {
+    shapes.push({ orig: bestMove.slice(0, 2), dest: bestMove.slice(2, 4), brush: 'green' });
+  }
+
+  if (Prep.ground && !init) {
+    Prep.ground.set({
+      fen: mistake.fen,
+      orientation,
+      movable: { color: undefined, dests: new Map() },
+      drawable: { shapes },
+    });
+  } else {
+    if (Prep.ground) { try { Prep.ground.destroy(); } catch { /* */ } }
+    Prep.ground = Chessground(wrap, {
+      fen: mistake.fen,
+      orientation,
+      movable: { color: undefined, free: false, dests: new Map() },
+      draggable: { enabled: false },
+      drawable: { enabled: true, visible: true, shapes },
+    });
+  }
 }
