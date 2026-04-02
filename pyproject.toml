@@ -41,6 +41,7 @@ dependencies = [
 dev = [
     "build>=1.2",
     "twine>=5.1",
+    "httpx>=0.24",
 ]
 
 [project.scripts]
