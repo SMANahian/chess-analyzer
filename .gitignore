@@ -1,20 +1,40 @@
 # Virtualenvs
 /.venv/
+/.pkg-venv/
+/venv/
+/env/
 
 # Python artifacts
 __pycache__/
 *.py[cod]
+*.pyo
+
+# Package build / dev install artifacts
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
 
 # Logs and coverage
 *.log
 app.log
+server.log
 .coverage
 htmlcov/
+.pytest_cache/
+.mypy_cache/
+coverage/
 
-# Local data
-/database/
-*.pgn
+# Local app data
+.chess-analyzer/
 *.processing
+
+# Browser / JS tooling
+node_modules/
+playwright-report/
+test-results/
+.playwright-data/
 
 # Editors / OS
 .DS_Store

@@ -1,174 +1,219 @@
-# Chess Analyzer ♔
+# Chess Analyzer
 
-A modern Flask web application that helps chess players review and improve their opening repertoire. Upload your personal PGN archives and let Stockfish highlight common mistakes and suggest stronger alternatives.
+Local chess opening analysis and training app built with FastAPI, SQLite, Stockfish, and a single-page frontend.
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue)
-![Flask](https://img.shields.io/badge/Flask-2.3+-green)
-![License](https://img.shields.io/badge/License-MIT-yellow)
+It lets you:
 
-## ✨ Features
+- upload PGNs for white and black separately
+- sync games from Lichess and Chess.com
+- find recurring opening mistakes with Stockfish
+- analyze games in background batches with live progress
+- keep synced games usable while more games are still being fetched
+- practice those positions in the browser
+- pause analysis and continue later from the last checkpoint
+- mark mistakes as mastered
+- export and restore full local backups
 
-### 🎯 Core Features
-- **Smart Opening Analysis** – Analyzes the first 20 plies (10 moves) of each game to focus on opening preparation
-- **Mistake Detection** – Identifies recurring mistakes with centipawn loss calculations
-- **Interactive Training Board** – Practice positions directly in the browser with drag-and-drop piece movement
-- **Stockfish Integration** – Powered by the strongest chess engine for accurate analysis
+## Requirements
 
-### 🎨 Modern UI/UX
-- **Beautiful Dark Theme** – Eye-friendly design with gradient accents
-- **Responsive Design** – Works seamlessly on desktop, tablet, and mobile
-- **Toast Notifications** – Real-time feedback for all actions
-- **Progress Indicators** – Visual feedback during analysis and uploads
-- **Keyboard Navigation** – Arrow keys to navigate positions, shortcuts for common actions
+- Python 3.8+
+- Stockfish available through one of:
+  - `STOCKFISH_PATH`
+  - a system `stockfish` install
 
-### 📊 Analysis Dashboard
-- **Statistics Overview** – Total mistakes, average CP loss, frequency data
-- **Severity Indicators** – Color-coded severity (Severe/High/Moderate)
-- **Advanced Filtering** – Search, filter by CP loss, severity level
-- **Sortable Table** – Sort by frequency, CP loss, or original order
-- **Export Functionality** – Export analysis results as JSON
+Install Stockfish if needed:
 
-### 🔒 Account System
-- **Secure Authentication** – Password hashing with Werkzeug security
-- **Session Management** – Secure cookie-based sessions
-- **Per-User Storage** – Each user's games and analysis stored separately
-
-### 🔗 API Endpoints
-- `GET /api/status` – Check analysis status for both colors
-- `GET /api/analysis/<color>` – Get analysis results as JSON
-- `GET /api/export` – Export all user data
-
-## 📋 Requirements
-
-- Python 3.10 or later
-- [Flask](https://flask.palletsprojects.com/) and [python-chess](https://python-chess.readthedocs.io/)
-- A Stockfish binary (automatically detected if installed via package manager)
-
-### Installing Stockfish
-
-**macOS:**
 ```bash
+# macOS
 brew install stockfish
+
+# Ubuntu / Debian
+sudo apt install stockfish
 ```
 
-**Ubuntu/Debian:**
+## Quick Start
+
 ```bash
-sudo apt-get install stockfish
+git clone https://github.com/SMANahian/chess-analyzer.git
+cd chess-analyzer
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+chess-analyzer
 ```
 
-**Windows:**
-Download from [stockfishchess.org/download](https://stockfishchess.org/download/)
+Published install:
 
-## 🚀 Quick Start
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/SMANahian/chess-analyzer.git
-   cd chess-analyzer
-   ```
-
-2. **Create and activate virtual environment:**
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
-
-3. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Run the application:**
-   ```bash
-   python app.py
-   ```
-
-5. **Open in browser:**
-   Visit [http://localhost:5000](http://localhost:5000)
-
-## ⚙️ Configuration
-
-Set environment variables to customize the application:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SECRET_KEY` | Random | Flask session secret key |
-| `ANALYSIS_DEPTH` | 14 | Stockfish analysis depth |
-| `OPENING_PLIES_LIMIT` | 20 | Number of plies to analyze (10 full moves) |
-| `MISTAKE_THRESHOLD_CP` | 100 | Minimum CP loss to consider a mistake |
-| `MIN_PAIR_OCCURRENCES` | 2 | Minimum times a position must occur |
-| `MAX_GAMES_PER_UPLOAD` | 1000 | Maximum games per upload |
-| `MAX_FILE_SIZE_MB` | 2 | Maximum PGN file size |
-| `STOCKFISH_PATH` | Auto | Path to Stockfish binary |
-| `STOCKFISH_THREADS` | - | Number of CPU threads for engine |
-| `STOCKFISH_HASH_MB` | - | Hash table size in MB |
-| `PORT` | 5000 | Server port |
-
-Example:
 ```bash
-export SECRET_KEY="your-secret-key"
-export ANALYSIS_DEPTH=16
-python app.py
+pipx install chess-analyzer
 ```
 
-## 📁 Project Structure
+Installer script:
 
-```
-chess-analyzer/
-├── app.py              # Main Flask application
-├── config.py           # Configuration settings
-├── requirements.txt    # Python dependencies
-├── utils/              # Utility modules
-│   ├── __init__.py
-│   ├── analysis.py     # Chess analysis logic
-│   ├── database.py     # User data management
-│   ├── stockfish.py    # Engine management
-│   └── validation.py   # Input validation
-├── templates/          # Jinja2 HTML templates
-│   ├── base.html       # Base layout
-│   ├── home.html       # Landing page
-│   ├── login.html      # Login page
-│   ├── register.html   # Registration page
-│   ├── upload.html     # PGN upload page
-│   ├── train.html      # Training dashboard
-│   ├── analysis.html   # Analysis/training board
-│   └── error.html      # Error pages
-├── assets/             # Static files
-│   ├── css/
-│   ├── js/
-│   └── img/
-└── database/           # User data storage
-```
-
-## 💡 Usage Tips
-
-1. **Export from OpeningTree** – Use [OpeningTree](https://www.openingtree.com/) to generate focused PGN files from your games
-2. **Separate Colors** – Upload White and Black games separately for faster, targeted analysis
-3. **Regular Updates** – Re-upload games periodically as you play more
-4. **Train Actively** – Delete mistakes once mastered to keep your training queue focused
-5. **Use Keyboard Shortcuts:**
-   - `←` / `→` – Navigate between positions
-   - `Home` / `End` – Jump to first/last position
-   - `H` – Show best move (hint)
-
-## 🔧 Development
-
-Run in debug mode:
 ```bash
-FLASK_DEBUG=1 python app.py
+curl -sSL https://raw.githubusercontent.com/SMANahian/chess-analyzer/main/install.sh | bash
 ```
 
-## 📄 License
+The CLI starts a local server on `http://127.0.0.1:8765` and opens the browser automatically.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+You can also run it directly as a module:
 
-## 🙏 Credits
+```bash
+python -m chess_analyzer --no-browser --port 8765
+```
 
-- Built by [S M A Nahian](https://smanahian.com)
-- Powered by [Stockfish](https://stockfishchess.org/)
-- Chess board UI by [chessboard.js](https://chessboardjs.com/)
-- Move validation by [chess.js](https://github.com/jhlywa/chess.js)
+## Features
 
-## ⚠️ Disclaimer
+- Opening-focused analysis over the first `OPENING_PLIES_LIMIT` plies
+- Recurring-mistake detection based on position plus played move
+- ECO opening tagging for common opening families
+- Incremental sync for Lichess and Chess.com with streamed PGN merges
+- Practice mode with hints, streak tracking, and session history
+- Batched background analysis with partial results published after each batch
+- Sync-linked analysis so newly fetched games can become usable before sync completes
+- Resume support for cancelled or incomplete analysis runs
+- Dark mode by default, with a persisted light-mode toggle
+- Local backup export/import for PGNs, mistakes, sync config, and practice data
 
-This application is intended for personal study. The Stockfish engine runs on the same machine as the Flask server. Do not expose the application directly to the public internet without additional security hardening.
+## Configuration
+
+Environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CHESS_ANALYZER_DATA` | `~/.chess-analyzer` | Local data directory |
+| `ANALYSIS_DEPTH` | `6` | Stockfish depth for fast opening triage |
+| `OPENING_PLIES_LIMIT` | `16` | Opening plies kept per game |
+| `MISTAKE_THRESHOLD_CP` | `120` | Minimum centipawn loss to keep |
+| `MIN_PAIR_OCCURRENCES` | `2` | Minimum repeat count for a mistake |
+| `MULTIPV` | `2` | Number of top engine lines checked |
+| `TOP_MOVE_THRESHOLD_CP` | `35` | Range for acceptable top moves |
+| `MATE_SCORE_CP` | `10000` | Mate score normalization |
+| `MAX_GAMES_PER_UPLOAD` | `1000` | Upload cap per color |
+| `MAX_FILE_SIZE_MB` | `10` | PGN upload limit |
+| `SYNC_BATCH_SIZE` | `100` | Remote sync chunk size before merging and publishing progress |
+| `LICHESS_SYNC_MAX_GAMES` | `1000` | Max Lichess games fetched per sync |
+| `CHESSCOM_SYNC_MAX_GAMES` | `1000` | Max Chess.com games fetched per sync |
+| `ANALYSIS_BATCH_GAMES` | `20` | Games processed before publishing partial results |
+| `ANALYSIS_BATCH_POSITION_LIMIT` | `60` | Repeated positions evaluated per batch |
+| `ANALYSIS_MAX_CANDIDATES` | `250` | Global recurring candidates considered in full analysis |
+| `STOCKFISH_PATH` | auto-detected | Engine binary path |
+| `STOCKFISH_THREADS` | `min(2, cpu_count - 1)` | Engine thread count |
+| `STOCKFISH_HASH_MB` | unset | Engine hash size |
+
+CLI flags:
+
+```bash
+chess-analyzer --host 127.0.0.1 --port 8765 --no-browser
+```
+
+Developer mode:
+
+```bash
+chess-analyzer --dev-mode
+```
+
+This exposes a live log page in the web UI for sync, analysis, and API events.
+
+## Data Storage
+
+All persistent app data lives in a local SQLite database under:
+
+```text
+~/.chess-analyzer/chess_analyzer.db
+```
+
+That includes:
+
+- uploaded PGNs
+- analysis results and mastered mistakes
+- sync configuration and known remote game IDs
+- practice session history
+
+## Project Layout
+
+```text
+chess_analyzer/
+├── __main__.py
+├── analysis.py
+├── cli.py
+├── db.py
+├── engine.py
+├── fetcher.py
+├── opening.py
+├── server.py
+└── static/
+    ├── app.js
+    ├── index.html
+    ├── style.css
+    └── vendor/
+```
+
+## Development
+
+Run the test suite:
+
+```bash
+python -m pip install -e '.[dev]'
+python -m unittest discover -s tests -v
+```
+
+Run the browser smoke tests:
+
+```bash
+npm install
+npx playwright install chromium
+npm run test:e2e
+```
+
+Rebuild or inspect the app locally:
+
+```bash
+python -m chess_analyzer --no-browser
+```
+
+API docs are available at:
+
+```text
+http://127.0.0.1:8765/api/docs
+```
+
+## Packaging
+
+Build the distributable artifacts:
+
+```bash
+python -m pip install -e '.[dev]'
+python -m build
+python -m twine check dist/*
+```
+
+Smoke-test the wheel in a clean virtualenv:
+
+```bash
+python -m venv .pkg-venv
+source .pkg-venv/bin/activate
+pip install dist/*.whl
+python -m chess_analyzer --version
+```
+
+If you want the installer to pull an unreleased Git ref instead of PyPI:
+
+```bash
+CHESS_ANALYZER_INSTALL_SOURCE=git CHESS_ANALYZER_GIT_REF=main ./install.sh
+```
+
+## Notes
+
+- This app is intended to run locally.
+- The API no longer enables permissive cross-origin access.
+- Analysis jobs are queued and can be cancelled from the UI.
+- Analysis progress is tracked in supported games, not just final completion.
+- Partial mistakes are published while analysis is still running, so practice can start immediately.
+- The default analysis path is intentionally biased toward fast repeated-opening-blunder detection rather than deep engine accuracy.
+- Active mistakes, snoozed mistakes, and mastered positions are tracked separately.
+- Stockfish is expected to come from `STOCKFISH_PATH` or a system install.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

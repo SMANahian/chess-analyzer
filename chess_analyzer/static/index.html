@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chess Analyzer</title>
+  <meta name="description" content="Find and fix your recurring chess opening mistakes." />
+  <meta name="theme-color" content="#1e293b" />
+
+  <script>
+    (() => {
+      const t = localStorage.getItem('chess-analyzer-theme') === 'light' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = t;
+      document.documentElement.style.colorScheme = t;
+    })();
+  </script>
+
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♟</text></svg>" />
+
+  <link rel="stylesheet" href="/static/vendor/chessground/assets/chessground.base.css" />
+  <link rel="stylesheet" href="/static/vendor/chessground/assets/chessground.brown.css" />
+  <link rel="stylesheet" href="/static/vendor/chessground/assets/chessground.cburnett.css" />
+
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <header id="site-header">
+    <div class="header-inner">
+      <a href="#/" class="site-logo">
+        <span>♟</span>
+        <span>Chess Analyzer</span>
+      </a>
+      <nav class="site-nav">
+        <a href="#/"               class="nav-link"><span class="nav-label">Dashboard</span></a>
+        <a href="#/analysis/white" class="nav-link"><span>♔</span><span class="nav-label">White</span><span class="nav-badge hidden" id="nav-badge-white"></span></a>
+        <a href="#/analysis/black" class="nav-link"><span>♚</span><span class="nav-label">Black</span><span class="nav-badge hidden" id="nav-badge-black"></span></a>
+        <a href="#/practice"       class="nav-link"><span class="nav-label">Practice</span></a>
+        <a href="#/openings"       class="nav-link"><span class="nav-label">Openings</span></a>
+        <a href="#/mastered"       class="nav-link"><span class="nav-label">Mastered</span></a>
+        <a href="#/snoozed"        class="nav-link"><span class="nav-label">Snoozed</span></a>
+        <a href="#/logs"           class="nav-link hidden" id="nav-logs"><span class="nav-label">Logs</span></a>
+      </nav>
+      <div class="header-right">
+        <div id="engine-badge"></div>
+        <button id="theme-toggle" class="theme-btn" type="button" aria-label="Switch theme"></button>
+      </div>
+    </div>
+  </header>
+
+  <main id="app"></main>
+
+  <div id="toast"></div>
+
+  <div id="shortcut-overlay" class="hidden">
+    <div class="shortcut-modal">
+      <div class="shortcut-head">
+        <h3>Keyboard Shortcuts</h3>
+        <button id="shortcut-close" aria-label="Close">×</button>
+      </div>
+      <div class="shortcut-body">
+        <div class="shortcut-row"><kbd>← / ↑</kbd><span>Previous mistake</span></div>
+        <div class="shortcut-row"><kbd>→ / ↓</kbd><span>Next mistake</span></div>
+        <div class="shortcut-row"><kbd>Home</kbd><span>First mistake</span></div>
+        <div class="shortcut-row"><kbd>End</kbd><span>Last mistake</span></div>
+        <div class="shortcut-row"><kbd>H</kbd><span>Toggle hint</span></div>
+        <div class="shortcut-row"><kbd>F</kbd><span>Flip board</span></div>
+        <div class="shortcut-row"><kbd>C</kbd><span>Copy FEN</span></div>
+        <div class="shortcut-row"><kbd>?</kbd><span>This overlay</span></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
