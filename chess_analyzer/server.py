@@ -5,6 +5,7 @@ import json
 import os
 from enum import Enum
 from pathlib import Path
+from typing import Optional
 
 from fastapi import Body, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
@@ -56,6 +57,21 @@ class PracticeAttemptIn(BaseModel):
 
 class AnalysisDepthIn(BaseModel):
     depth: int = Field(ge=1, le=30)
+
+
+class OpponentIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    lichess_username: Optional[str] = Field(default=None, max_length=64)
+    chesscom_username: Optional[str] = Field(default=None, max_length=64)
+
+    def clean(self) -> "OpponentIn":
+        self.lichess_username = (self.lichess_username or "").strip() or None
+        self.chesscom_username = (self.chesscom_username or "").strip() or None
+        return self
+
+
+class RunOpponentSyncIn(BaseModel):
+    max_games: int = Field(default=500, ge=50, le=5000)
 
 
 app = FastAPI(
@@ -403,6 +419,93 @@ async def get_analysis_depth() -> JSONResponse:
     raw = db.get_setting("analysis_depth")
     depth = int(raw) if raw else analysis.ANALYSIS_DEPTH
     return JSONResponse({"depth": depth})
+
+
+# ── Opponent prep ──────────────────────────────────────────────────────────
+
+@app.get("/api/opponents")
+async def list_opponents_route() -> JSONResponse:
+    return JSONResponse({"opponents": db.list_opponents()})
+
+
+@app.post("/api/opponents", status_code=201)
+async def create_opponent_route(body: OpponentIn) -> JSONResponse:
+    body = body.clean()
+    if not body.lichess_username and not body.chesscom_username:
+        raise HTTPException(400, "At least one username (Lichess or Chess.com) is required")
+    opponent_id = db.create_opponent(body.name, body.lichess_username, body.chesscom_username)
+    return JSONResponse({"opponent_id": opponent_id})
+
+
+@app.get("/api/opponents/{opponent_id}")
+async def get_opponent_route(opponent_id: int) -> JSONResponse:
+    opp = db.get_opponent(opponent_id)
+    if not opp:
+        raise HTTPException(404, "Opponent not found")
+    return JSONResponse({"opponent": opp})
+
+
+@app.put("/api/opponents/{opponent_id}")
+async def update_opponent_route(opponent_id: int, body: OpponentIn) -> JSONResponse:
+    body = body.clean()
+    if not body.lichess_username and not body.chesscom_username:
+        raise HTTPException(400, "At least one username (Lichess or Chess.com) is required")
+    if not db.update_opponent(opponent_id, body.name, body.lichess_username, body.chesscom_username):
+        raise HTTPException(404, "Opponent not found")
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/opponents/{opponent_id}")
+async def delete_opponent_route(opponent_id: int) -> JSONResponse:
+    if not db.delete_opponent(opponent_id):
+        raise HTTPException(404, "Opponent not found")
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/opponents/{opponent_id}/sync", status_code=202)
+async def sync_opponent_route(opponent_id: int, body: RunOpponentSyncIn = Body(default=RunOpponentSyncIn())) -> JSONResponse:
+    opp = db.get_opponent(opponent_id)
+    if not opp:
+        raise HTTPException(404, "Opponent not found")
+    if not opp.get("lichess_username") and not opp.get("chesscom_username"):
+        raise HTTPException(400, "Opponent has no usernames configured")
+    run = db.latest_opponent_sync_run(opponent_id)
+    if run and run["status"] == "running":
+        raise HTTPException(409, "Sync already running for this opponent")
+    ok, _ = fetcher.engine_status() if hasattr(fetcher, "engine_status") else (True, "")
+    from chess_analyzer.engine import engine_status as _eng_status
+    eng_ok, _ = _eng_status()
+    if not eng_ok:
+        raise HTTPException(503, "Stockfish engine not available — install it first")
+    fetcher.sync_opponent_in_background(opponent_id, max_games=body.max_games)
+    db.log_event("api", f"Opponent sync queued for {opponent_id}", details={"opponent_id": opponent_id})
+    return JSONResponse({"status": "started", "opponent_id": opponent_id})
+
+
+@app.get("/api/opponents/{opponent_id}/status")
+async def opponent_sync_status(opponent_id: int) -> JSONResponse:
+    opp = db.get_opponent(opponent_id)
+    if not opp:
+        raise HTTPException(404, "Opponent not found")
+    run = db.latest_opponent_sync_run(opponent_id)
+    return JSONResponse({"opponent": opp, "latest_run": run})
+
+
+@app.get("/api/opponents/{opponent_id}/mistakes")
+async def get_opponent_mistakes_route(opponent_id: int) -> JSONResponse:
+    opp = db.get_opponent(opponent_id)
+    if not opp:
+        raise HTTPException(404, "Opponent not found")
+    all_mistakes = db.get_opponent_mistakes(opponent_id)
+    white = [m for m in all_mistakes if m["color"] == "white"]
+    black = [m for m in all_mistakes if m["color"] == "black"]
+    return JSONResponse({
+        "opponent": opp,
+        "white": white,
+        "black": black,
+        "white_count": len(white),
+        "black_count": len(black),
+    })
 
 
 @app.get("/health", include_in_schema=False)

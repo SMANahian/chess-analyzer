@@ -19,6 +19,7 @@ const S = {
     opening: 'all',
     severity: 'all',
     sort: 'default',
+    threshold: 50,
   },
 };
 
@@ -42,9 +43,20 @@ const ROUTES = {
   '/analysis/black': () => renderAnalysis('black'),
   '/practice': renderPractice,
   '/openings': renderOpenings,
+  '/prep': renderPrep,
   '/mastered': renderMastered,
   '/snoozed': renderSnoozed,
   '/logs': renderLogs,
+};
+
+const Prep = {
+  opponents: [],
+  detail: null,       // current opponent full data
+  mistakes: null,     // {white, black, white_count, black_count}
+  color: 'white',
+  idx: 0,
+  ground: null,
+  showForm: false,
 };
 
 window.addEventListener('hashchange', route);
@@ -59,6 +71,17 @@ window.addEventListener('load', async () => {
 
 function route() {
   const hash = location.hash.replace(/^#/, '') || '/';
+
+  // Prep detail route: #/prep/123
+  const prepMatch = hash.match(/^\/prep\/(\d+)$/);
+  if (prepMatch) {
+    document.querySelectorAll('.nav-link').forEach(link =>
+      link.classList.toggle('active', link.getAttribute('href') === '#/prep')
+    );
+    renderPrepDetail(parseInt(prepMatch[1], 10));
+    return;
+  }
+
   document.querySelectorAll('.nav-link').forEach(link =>
     link.classList.toggle('active', link.getAttribute('href') === `#${hash}`)
   );
@@ -191,7 +214,7 @@ function renderGames() {
         <div class="onboarding">
           <div class="onboard-hero">
             <h1>Analyze your opening mistakes</h1>
-            <p>Connect your Lichess or Chess.com account. Stockfish finds recurring mistakes in your openings — then you drill them until they stick.</p>
+            <p>Enter your username and Stockfish will find recurring mistakes in your openings — then drill them until they stick.</p>
           </div>
 
           <div class="platform-grid">
@@ -204,14 +227,8 @@ function renderGames() {
                 </div>
               </div>
               <div class="connect-row">
-                <span class="connect-label">♔ White</span>
-                <input id="input-lichess-white" type="text" placeholder="Your username" class="field field-sm" />
-                <button id="btn-save-lichess-white" class="btn btn-primary btn-sm">Connect</button>
-              </div>
-              <div class="connect-row">
-                <span class="connect-label">♚ Black</span>
-                <input id="input-lichess-black" type="text" placeholder="Your username" class="field field-sm" />
-                <button id="btn-save-lichess-black" class="btn btn-primary btn-sm">Connect</button>
+                <input id="input-lichess-both" type="text" placeholder="Your Lichess username" class="field" />
+                <button id="btn-save-lichess-both" class="btn btn-primary">Connect</button>
               </div>
             </div>
 
@@ -224,19 +241,13 @@ function renderGames() {
                 </div>
               </div>
               <div class="connect-row">
-                <span class="connect-label">♔ White</span>
-                <input id="input-chesscom-white" type="text" placeholder="Your username" class="field field-sm" />
-                <button id="btn-save-chesscom-white" class="btn btn-primary btn-sm">Connect</button>
-              </div>
-              <div class="connect-row">
-                <span class="connect-label">♚ Black</span>
-                <input id="input-chesscom-black" type="text" placeholder="Your username" class="field field-sm" />
-                <button id="btn-save-chesscom-black" class="btn btn-primary btn-sm">Connect</button>
+                <input id="input-chesscom-both" type="text" placeholder="Your Chess.com username" class="field" />
+                <button id="btn-save-chesscom-both" class="btn btn-primary">Connect</button>
               </div>
             </div>
           </div>
 
-          <div class="onboard-or">or upload PGN files directly</div>
+          <div class="onboard-or">or upload PGN files (white/black separately)</div>
           <div class="pgn-row">
             <button class="btn btn-secondary" id="upload-white-btn">♔ Upload White PGN</button>
             <input type="file" id="file-white" accept=".pgn" class="hidden" />
@@ -290,15 +301,7 @@ function renderGames() {
           ${colorCard('black', colors.black || {})}
         </div>
 
-        ${S.syncConfigs.length ? `
-          <div class="card" style="margin-bottom:16px">
-            <div class="card-head">
-              <h2>Sync sources</h2>
-              <span class="badge badge-default">${S.syncConfigs.length} configured</span>
-            </div>
-            <div class="sync-list">${S.syncConfigs.map(syncConfigRow).join('')}</div>
-          </div>
-        ` : ''}
+        ${accountsCard()}
 
         <div class="card">
           <div class="card-head"><h2>Data</h2></div>
@@ -313,11 +316,22 @@ function renderGames() {
     `);
   }
 
-  // Event listeners — work in both onboarding and dashboard mode
+  // Event listeners — onboarding: unified platform connect
+  document.getElementById('btn-save-lichess-both')?.addEventListener('click', () => saveSyncConfigBoth('lichess'));
+  document.getElementById('btn-save-chesscom-both')?.addEventListener('click', () => saveSyncConfigBoth('chesscom'));
+  document.getElementById('input-lichess-both')?.addEventListener('keydown', evt => {
+    if (evt.key === 'Enter') saveSyncConfigBoth('lichess');
+  });
+  document.getElementById('input-chesscom-both')?.addEventListener('keydown', evt => {
+    if (evt.key === 'Enter') saveSyncConfigBoth('chesscom');
+  });
+
+  // Dashboard: accounts card — add new platform
+  document.getElementById('btn-save-lichess-new')?.addEventListener('click', () => saveSyncConfigBoth('lichess', 'accounts-lichess-input'));
+  document.getElementById('btn-save-chesscom-new')?.addEventListener('click', () => saveSyncConfigBoth('chesscom', 'accounts-chesscom-input'));
+
+  // Dashboard: PGN drop zones and color-specific controls
   ['white', 'black'].forEach(color => {
-    document.querySelectorAll(`[data-tab-group="${color}"]`).forEach(btn =>
-      btn.addEventListener('click', () => switchTab(color, btn.dataset.tab))
-    );
     const zone = document.getElementById(`zone-${color}`);
     const input = document.getElementById(`file-${color}`);
     if (zone && input) {
@@ -334,8 +348,6 @@ function renderGames() {
       input.addEventListener('change', () => { if (input.files[0]) doUpload(color, input.files[0]); });
     }
     document.getElementById(`upload-${color}-btn`)?.addEventListener('click', () => input?.click());
-    document.getElementById(`btn-save-lichess-${color}`)?.addEventListener('click', () => saveSyncConfig(color, 'lichess'));
-    document.getElementById(`btn-save-chesscom-${color}`)?.addEventListener('click', () => saveSyncConfig(color, 'chesscom'));
     document.getElementById(`btn-analyze-${color}`)?.addEventListener('click', () => doAnalyze(color));
     document.getElementById(`btn-cancel-${color}`)?.addEventListener('click', () => doCancelAnalysis(color));
     document.getElementById(`depth-select-${color}`)?.addEventListener('change', async evt => {
@@ -348,18 +360,37 @@ function renderGames() {
     });
   });
 
-  document.querySelectorAll('[data-toggle-opts]').forEach(btn =>
+  // Grouped account row controls
+  document.querySelectorAll('[data-toggle-opts-grp]').forEach(btn =>
     btn.addEventListener('click', () => {
-      const opts = document.getElementById(`sync-opts-${btn.dataset.toggleOpts}`);
+      const opts = document.getElementById(`sync-opts-grp-${btn.dataset.toggleOptsGrp}`);
       if (opts) opts.style.display = opts.style.display === 'none' ? 'flex' : 'none';
     })
   );
-  document.querySelectorAll('[data-resync]').forEach(btn =>
-    btn.addEventListener('click', () => doResync(Number(btn.dataset.resync)))
+  document.querySelectorAll('[data-resync-grp]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const ids = btn.dataset.resyncGrp.split(',').map(Number);
+      const maxInput = document.getElementById(`sync-max-grp-${ids[0]}`);
+      const fullInput = document.getElementById(`sync-full-grp-${ids[0]}`);
+      const maxGames = maxInput ? (parseInt(maxInput.value, 10) || 0) : 0;
+      const fullResync = fullInput ? fullInput.checked : false;
+      ids.forEach(id => doResyncWith(id, maxGames, fullResync));
+    })
   );
-  document.querySelectorAll('[data-delsync]').forEach(btn =>
-    btn.addEventListener('click', () => doDeleteSync(Number(btn.dataset.delsync)))
+  document.querySelectorAll('[data-delsync-grp]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const ids = btn.dataset.delsyncGrp.split(',').map(Number);
+      doDeleteSyncGroup(ids);
+    })
   );
+
+  // Account add inputs — Enter key support
+  document.getElementById('accounts-lichess-input')?.addEventListener('keydown', evt => {
+    if (evt.key === 'Enter') saveSyncConfigBoth('lichess', 'accounts-lichess-input');
+  });
+  document.getElementById('accounts-chesscom-input')?.addEventListener('keydown', evt => {
+    if (evt.key === 'Enter') saveSyncConfigBoth('chesscom', 'accounts-chesscom-input');
+  });
 
   document.getElementById('btn-export')?.addEventListener('click', doExport);
   document.getElementById('btn-import')?.addEventListener('click', () => document.getElementById('import-file')?.click());
@@ -376,8 +407,6 @@ function colorCard(color, info) {
   const icon = color === 'white' ? '♔' : '♚';
   const hasGames = (info.game_count || 0) > 0;
   const statusHtml = analysisStatusBlock(color, info);
-  const lichessCfg = S.syncConfigs.find(cfg => cfg.color === color && cfg.platform === 'lichess');
-  const chessComCfg = S.syncConfigs.find(cfg => cfg.color === color && cfg.platform === 'chesscom');
 
   return `
     <div class="color-card ${color}">
@@ -390,29 +419,12 @@ function colorCard(color, info) {
       </div>
 
       <div class="color-card-body">
-        <div class="tab-strip" role="tablist">
-          <button class="tab-btn active" data-tab-group="${color}" data-tab="file">📄 File</button>
-          <button class="tab-btn" data-tab-group="${color}" data-tab="lichess">⚡ Lichess</button>
-          <button class="tab-btn" data-tab-group="${color}" data-tab="chesscom">♟ Chess.com</button>
+        <div id="zone-${color}" class="drop-zone">
+          <input type="file" id="file-${color}" accept=".pgn" class="hidden" />
+          <div class="drop-zone-icon">${hasGames ? '🔄' : '📂'}</div>
+          <div class="drop-zone-title">${hasGames ? 'Replace ${cap} PGN' : 'Drop a PGN file here'}</div>
+          <p>${hasGames ? 'Drop a new file or click to browse' : 'Upload a PGN exported from any platform'}</p>
         </div>
-
-        <div id="tab-${color}-file" class="tab-pane">
-          <div id="zone-${color}" class="drop-zone">
-            <input type="file" id="file-${color}" accept=".pgn" class="hidden" />
-            <div class="drop-zone-icon">${hasGames ? '🔄' : '📂'}</div>
-            <div class="drop-zone-title">${hasGames ? 'Replace PGN' : 'Drop a PGN file here'}</div>
-            <p>${hasGames ? 'Drop a new file or click to browse' : 'Supports PGN files from any platform'}</p>
-          </div>
-        </div>
-
-        <div id="tab-${color}-lichess" class="tab-pane hidden">
-          ${syncInputPanel(color, 'lichess', lichessCfg)}
-        </div>
-
-        <div id="tab-${color}-chesscom" class="tab-pane hidden">
-          ${syncInputPanel(color, 'chesscom', chessComCfg)}
-        </div>
-
         <div id="color-status-${color}">${statusHtml}</div>
       </div>
     </div>
@@ -471,28 +483,6 @@ function analysisStatusBlock(color, info) {
   `;
 }
 
-function syncDetailBits(cfg) {
-  const run = cfg?.latest_run;
-  const details = run?.details || {};
-  const bits = [];
-  if (cfg?.last_synced_at) bits.push(`Last synced ${timeAgo(cfg.last_synced_at)}`);
-  if (run?.status === 'running') {
-    const fetched = details.fetched_ids || 0;
-    const stored = details.total_games_after_merge || 0;
-    bits.push(`fetching ${fetched}`);
-    bits.push(`${stored} games usable now`);
-    if (details.analysis_streaming && details.analysis_total) {
-      bits.push(`analysis ${details.analysis_progress || 0}/${details.analysis_total}`);
-    }
-  } else {
-    if (run?.status === 'done') bits.push(`+${run.games_new} new ids`);
-    if (details.total_games_after_merge) bits.push(`${details.total_games_after_merge} total games`);
-  }
-  if (details.supported_new_games) bits.push(`${details.supported_new_games} supported new`);
-  if (details.pages_fetched) bits.push(`${details.pages_fetched} page(s) fetched`);
-  if (details.archives_scanned) bits.push(`${details.archives_scanned} archive month(s) scanned`);
-  return bits;
-}
 
 function syncProgressMarkup(run) {
   const details = run?.details || {};
@@ -508,85 +498,97 @@ function syncProgressMarkup(run) {
   `;
 }
 
-function syncInputPanel(color, platform, cfg) {
-  const run = cfg?.latest_run;
-  const placeholder = platform === 'lichess' ? 'Lichess username' : 'Chess.com username';
-  const detailBits = syncDetailBits(cfg);
+function accountsCard() {
+  const lichessConfigs = S.syncConfigs.filter(c => c.platform === 'lichess');
+  const chesscomConfigs = S.syncConfigs.filter(c => c.platform === 'chesscom');
+  const anyRunning = S.syncConfigs.some(c => c.latest_run?.status === 'running');
 
-  return `
-    <div>
-      <div class="sync-field-row">
-        <input
-          id="input-${platform}-${color}"
-          type="text"
-          value="${esc(cfg?.username || '')}"
-          placeholder="${placeholder}"
-          class="field field-sm"
-        />
-        <button id="btn-save-${platform}-${color}" class="btn btn-secondary btn-sm" ${run?.status === 'running' ? 'disabled' : ''}>
-          ${cfg ? 'Save & sync' : 'Connect'}
-        </button>
-      </div>
-      <p class="field-help">
-        ${cfg ? detailBits.join(' · ') || 'Connected' : 'Stores games locally — only fetches new games on later syncs.'}
-      </p>
-      ${syncProgressMarkup(run)}
-      ${run?.status === 'error' ? `<p class="error-text">${esc(run.error || 'sync failed')}</p>` : ''}
-    </div>
-  `;
-}
+  // Group by username so white+black for the same account show as one row
+  const grouped = {};
+  for (const cfg of S.syncConfigs) {
+    const key = `${cfg.platform}:${cfg.username}`;
+    if (!grouped[key]) grouped[key] = { platform: cfg.platform, username: cfg.username, configs: [] };
+    grouped[key].configs.push(cfg);
+  }
 
-function syncConfigRow(cfg) {
-  const run = cfg.latest_run;
-  const platformIcon = cfg.platform === 'lichess' ? '⚡' : '♟';
-  const colorIcon = cfg.color === 'white' ? '♔' : '♚';
-  const running = run?.status === 'running';
-  const bits = syncDetailBits(cfg);
-  const hasHistory = !!(cfg.last_synced_at || run);
-
-  return `
-    <div class="sync-row" id="sync-row-${cfg.id}">
-      <span class="sync-icon">${platformIcon}</span>
-      <div class="sync-row-body">
-        <strong>${colorIcon} ${esc(cfg.username)}</strong>
-        <p>${cfg.platform} · ${bits.join(' · ') || 'ready to sync'}</p>
-        ${running ? syncProgressMarkup(run) : ''}
-        <div class="sync-options" id="sync-opts-${cfg.id}" style="display:none">
-          <label class="sync-opt-label">Max games
-            <input type="number" class="field field-sm sync-max-games" id="sync-max-${cfg.id}"
-              placeholder="5000" min="100" max="50000" step="100" value="5000" style="width:90px;margin-left:6px" />
-          </label>
-          ${cfg.platform === 'lichess' && hasHistory ? `
-            <label class="sync-opt-label" style="margin-left:12px">
-              <input type="checkbox" id="sync-full-${cfg.id}" />
-              Full re-sync (fetch all history)
+  const rows = Object.values(grouped).map(g => {
+    const icon = g.platform === 'lichess' ? '⚡' : '♟';
+    const running = g.configs.some(c => c.latest_run?.status === 'running');
+    const hasError = g.configs.some(c => c.latest_run?.status === 'error');
+    const lastSynced = g.configs.map(c => c.last_synced_at).filter(Boolean).sort().pop();
+    const totalNew = g.configs.reduce((s, c) => s + (c.latest_run?.games_new || 0), 0);
+    // Use any config id for sync/delete actions (both colors get the same username)
+    const cfgIds = g.configs.map(c => c.id);
+    return `
+      <div class="sync-row">
+        <span class="sync-icon">${icon}</span>
+        <div class="sync-row-body">
+          <strong>${esc(g.username)}</strong>
+          <p>${g.platform}${lastSynced ? ` · synced ${timeAgo(lastSynced)}` : ' · not yet synced'}</p>
+          ${running ? syncProgressMarkup(g.configs.find(c => c.latest_run?.status === 'running')?.latest_run) : ''}
+          <div class="sync-options" id="sync-opts-grp-${cfgIds[0]}" style="display:none">
+            <label class="sync-opt-label">Max games
+              <input type="number" class="field field-sm" id="sync-max-grp-${cfgIds[0]}"
+                placeholder="5000" min="100" max="50000" step="100" value="5000" style="width:90px;margin-left:6px" />
             </label>
-          ` : ''}
+            ${g.platform === 'lichess' && lastSynced ? `
+              <label class="sync-opt-label" style="margin-left:12px">
+                <input type="checkbox" id="sync-full-grp-${cfgIds[0]}" />
+                Full re-sync
+              </label>` : ''}
+          </div>
         </div>
+        <div class="sync-row-side">
+          ${running ? `<span class="badge badge-blue">Fetching</span>` : ''}
+          ${hasError ? `<span class="badge badge-red">Error</span>` : ''}
+          ${!running && !hasError && totalNew > 0 ? `<span class="badge badge-green">+${totalNew}</span>` : ''}
+          <button class="btn-icon" data-toggle-opts-grp="${cfgIds[0]}" title="Sync options" ${running ? 'disabled' : ''}>⚙</button>
+          <button class="btn-icon" data-resync-grp="${cfgIds.join(',')}" title="Sync now" ${running ? 'disabled' : ''}>
+            ${running ? '<span class="spinner"></span>' : '↺'}
+          </button>
+          <button class="btn-icon" data-delsync-grp="${cfgIds.join(',')}" title="Remove">✕</button>
+        </div>
+      </div>`;
+  });
+
+  const hasLichess = lichessConfigs.length > 0;
+  const hasChesscom = chesscomConfigs.length > 0;
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head">
+        <h2>Accounts</h2>
+        ${S.syncConfigs.length ? `<span class="badge badge-default">${Object.keys(grouped).length} connected</span>` : ''}
       </div>
-      <div class="sync-row-side">
-        ${run?.status === 'done'    ? `<span class="badge badge-green">+${run.games_new}</span>` : ''}
-        ${run?.status === 'running' ? `<span class="badge badge-blue">Fetching</span>` : ''}
-        ${run?.status === 'error'   ? `<span class="badge badge-red" title="${esc(run.error || '')}">Error</span>` : ''}
-        <button class="btn-icon" data-toggle-opts="${cfg.id}" title="Sync options" ${running ? 'disabled' : ''}>⚙</button>
-        <button class="btn-icon" data-resync="${cfg.id}" title="Sync now" ${running ? 'disabled' : ''}>
-          ${running ? '<span class="spinner"></span>' : '↺'}
-        </button>
-        <button class="btn-icon" data-delsync="${cfg.id}" title="Remove">✕</button>
+      ${rows.length ? `<div class="sync-list" style="margin-bottom:12px">${rows.join('')}</div>` : ''}
+      <div class="accounts-add-row">
+        ${!hasLichess ? `
+          <div class="accounts-platform-row">
+            <span class="sync-icon">⚡</span>
+            <input id="accounts-lichess-input" type="text" placeholder="Lichess username" class="field field-sm" />
+            <button id="btn-save-lichess-new" class="btn btn-primary btn-sm" ${anyRunning ? 'disabled' : ''}>Connect</button>
+          </div>` : `
+          <div class="accounts-platform-row">
+            <span class="sync-icon">⚡</span>
+            <input id="accounts-lichess-input" type="text" placeholder="Add another Lichess username" class="field field-sm" />
+            <button id="btn-save-lichess-new" class="btn btn-secondary btn-sm" ${anyRunning ? 'disabled' : ''}>Add</button>
+          </div>`}
+        ${!hasChesscom ? `
+          <div class="accounts-platform-row">
+            <span class="sync-icon">♟</span>
+            <input id="accounts-chesscom-input" type="text" placeholder="Chess.com username" class="field field-sm" />
+            <button id="btn-save-chesscom-new" class="btn btn-primary btn-sm" ${anyRunning ? 'disabled' : ''}>Connect</button>
+          </div>` : `
+          <div class="accounts-platform-row">
+            <span class="sync-icon">♟</span>
+            <input id="accounts-chesscom-input" type="text" placeholder="Add another Chess.com username" class="field field-sm" />
+            <button id="btn-save-chesscom-new" class="btn btn-secondary btn-sm" ${anyRunning ? 'disabled' : ''}>Add</button>
+          </div>`}
       </div>
-    </div>
-  `;
+    </div>`;
 }
 
-function switchTab(color, tab) {
-  document.querySelectorAll(`[data-tab-group="${color}"]`).forEach(btn =>
-    btn.classList.toggle('active', btn.dataset.tab === tab)
-  );
-  ['file', 'lichess', 'chesscom'].forEach(name => {
-    const pane = document.getElementById(`tab-${color}-${name}`);
-    if (pane) pane.classList.toggle('hidden', name !== tab);
-  });
-}
+
 
 async function doUpload(color, file) {
   const fd = new FormData();
@@ -601,35 +603,41 @@ async function doUpload(color, file) {
   }
 }
 
-async function saveSyncConfig(color, platform) {
-  const input = document.getElementById(`input-${platform}-${color}`);
+async function saveSyncConfigBoth(platform, inputId = null) {
+  const id = inputId || `input-${platform}-both`;
+  const input = document.getElementById(id);
   const username = input?.value.trim();
   if (!username) {
-    toast('Enter a username before saving', 'error');
+    toast('Enter a username', 'error');
     return;
   }
   try {
-    const result = await POST('/sync', { color, platform, username });
-    await POST(`/sync/${result.config_id}/run`);
+    // Connect both white and black for this username+platform
+    const [resW, resB] = await Promise.all([
+      POST('/sync', { color: 'white', platform, username }),
+      POST('/sync', { color: 'black', platform, username }),
+    ]);
+    await Promise.all([
+      POST(`/sync/${resW.config_id}/run`),
+      POST(`/sync/${resB.config_id}/run`),
+    ]);
     toast(`Syncing ${platform} games for ${username}`, 'info');
+    if (input) input.value = '';
     await refreshAll();
     renderGames();
-    pollSync(result.config_id);
+    pollSync(resW.config_id);
+    pollSync(resB.config_id);
   } catch (err) {
     toast(err.message, 'error');
   }
 }
 
-async function doResync(configId) {
+async function doResyncWith(configId, maxGames = 0, fullResync = false) {
   try {
     const cfg = S.syncConfigs.find(item => item.id === configId);
-    const maxInput = document.getElementById(`sync-max-${configId}`);
-    const fullInput = document.getElementById(`sync-full-${configId}`);
-    const maxGames = maxInput ? (parseInt(maxInput.value, 10) || 0) : 0;
-    const fullResync = fullInput ? fullInput.checked : false;
     await POST(`/sync/${configId}/run`, { max_games: maxGames, full_resync: fullResync });
     const note = fullResync ? ' (full re-sync)' : '';
-    toast(`Re-syncing ${cfg?.platform || 'source'}${note}`, 'info');
+    toast(`Re-syncing ${cfg?.platform || 'source'} for ${cfg?.username || ''}${note}`, 'info');
     await refreshAll();
     renderGames();
     pollSync(configId);
@@ -638,12 +646,12 @@ async function doResync(configId) {
   }
 }
 
-async function doDeleteSync(configId) {
-  const cfg = S.syncConfigs.find(item => item.id === configId);
-  if (!confirm(`Remove the sync source for ${cfg?.username} on ${cfg?.platform}?`)) return;
+async function doDeleteSyncGroup(configIds) {
+  const first = S.syncConfigs.find(c => c.id === configIds[0]);
+  if (!confirm(`Remove ${esc(first?.username || 'this account')} on ${first?.platform || 'this platform'}?`)) return;
   try {
-    await DEL(`/sync/${configId}`);
-    toast('Sync source removed', 'success');
+    await Promise.all(configIds.map(id => DEL(`/sync/${id}`)));
+    toast('Account removed', 'success');
     await refreshAll();
     renderGames();
   } catch (err) {
@@ -761,7 +769,7 @@ async function renderAnalysis(color, options = {}) {
     S.stats = data.stats || {};
     S.analysisMeta = data;
     S.allMistakes = data.mistakes || [];
-    S.filters = preserve && previousFilters ? previousFilters : { query: '', opening: 'all', severity: 'all', sort: 'default' };
+    S.filters = preserve && previousFilters ? previousFilters : { query: '', opening: 'all', severity: 'all', sort: 'default', threshold: 50 };
     if (!preserve) S.idx = 0;
     applyAnalysisFilters(false);
     if (preserve && previousKey) {
@@ -860,6 +868,16 @@ function buildAnalysisUI() {
                 <option value="blunder">Blunder 300+</option>
               </select>
             </div>
+            <select id="filter-threshold" class="sel field-sm" title="Minimum CP loss to show">
+              <option value="0">All mistakes</option>
+              <option value="50">≥ 50cp</option>
+              <option value="80">≥ 80cp</option>
+              <option value="100">≥ 100cp</option>
+              <option value="120">≥ 120cp</option>
+              <option value="150">≥ 150cp</option>
+              <option value="200">≥ 200cp</option>
+              <option value="300">≥ 300cp (blunders)</option>
+            </select>
             <select id="filter-sort" class="sel field-sm">
               <option value="default">Most frequent</option>
               <option value="cp">Worst cp loss</option>
@@ -912,6 +930,7 @@ function buildAnalysisUI() {
   openingSelect.value = S.filters.opening;
   document.getElementById('filter-query').value = S.filters.query;
   document.getElementById('filter-severity').value = S.filters.severity;
+  document.getElementById('filter-threshold').value = String(S.filters.threshold ?? 50);
   document.getElementById('filter-sort').value = S.filters.sort;
 
   document.getElementById('filter-query').addEventListener('input', evt => {
@@ -924,6 +943,10 @@ function buildAnalysisUI() {
   });
   document.getElementById('filter-severity').addEventListener('change', evt => {
     S.filters.severity = evt.target.value;
+    applyAnalysisFilters();
+  });
+  document.getElementById('filter-threshold').addEventListener('change', evt => {
+    S.filters.threshold = Number(evt.target.value);
     applyAnalysisFilters();
   });
   document.getElementById('filter-sort').addEventListener('change', evt => {
@@ -1005,7 +1028,9 @@ function applyAnalysisFilters(shouldRender = true) {
       || (S.filters.severity === 'mistake' && item.avg_cp_loss >= 150)
       || (S.filters.severity === 'inaccuracy' && item.avg_cp_loss >= 100);
 
-    return matchesQuery && matchesOpening && matchesSeverity;
+    const matchesThreshold = item.avg_cp_loss >= (S.filters.threshold || 0);
+
+    return matchesQuery && matchesOpening && matchesSeverity && matchesThreshold;
   });
 
   // Apply sort
@@ -2450,4 +2475,388 @@ function buildSM2Queue(mistakes) {
 /** Fire-and-forget: record a practice attempt and advance SM-2. */
 function recordAttempt(mistakeId, correct) {
   POST('/practice/attempt', { mistake_id: mistakeId, correct }).catch(() => {});
+}
+
+// ── Opponent Prep ──────────────────────────────────────────────────────────
+
+async function renderPrep() {
+  try {
+    const data = await GET('/opponents');
+    Prep.opponents = data.opponents || [];
+  } catch {
+    Prep.opponents = [];
+  }
+
+  setApp(`
+    <div class="page" id="prep-view">
+      <div class="page-header">
+        <h1>Opponent Prep</h1>
+        <button id="btn-new-opp" class="btn btn-primary">+ Add opponent</button>
+      </div>
+
+      <div id="opp-add-form" class="opp-add-form hidden" style="margin-bottom:16px">
+        <h3>New opponent</h3>
+        <div class="opp-form-row">
+          <input id="opp-name" class="field" placeholder="Name (e.g. Magnus)" />
+        </div>
+        <div class="opp-form-row">
+          <input id="opp-lichess" class="field field-sm" placeholder="Lichess username (optional)" />
+          <input id="opp-chesscom" class="field field-sm" placeholder="Chess.com username (optional)" />
+        </div>
+        <div style="display:flex;gap:8px">
+          <button id="btn-save-opp" class="btn btn-primary">Save</button>
+          <button id="btn-cancel-opp" class="btn btn-ghost">Cancel</button>
+        </div>
+      </div>
+
+      ${Prep.opponents.length === 0 ? `
+        <div class="empty">
+          <p>No opponents added yet.</p>
+          <p>Add an opponent to fetch their games and find their opening weaknesses.</p>
+        </div>
+      ` : `
+        <div class="opp-list">
+          ${Prep.opponents.map(oppRow).join('')}
+        </div>
+      `}
+    </div>
+  `);
+
+  document.getElementById('btn-new-opp').addEventListener('click', () => {
+    document.getElementById('opp-add-form').classList.toggle('hidden');
+  });
+  document.getElementById('btn-cancel-opp').addEventListener('click', () => {
+    document.getElementById('opp-add-form').classList.add('hidden');
+  });
+  document.getElementById('btn-save-opp').addEventListener('click', doCreateOpponent);
+
+  document.querySelectorAll('[data-opp-sync]').forEach(btn =>
+    btn.addEventListener('click', evt => {
+      evt.stopPropagation();
+      doSyncOpponent(Number(btn.dataset.oppSync));
+    })
+  );
+  document.querySelectorAll('[data-opp-del]').forEach(btn =>
+    btn.addEventListener('click', evt => {
+      evt.stopPropagation();
+      doDeleteOpponent(Number(btn.dataset.oppDel));
+    })
+  );
+  document.querySelectorAll('[data-opp-nav]').forEach(el =>
+    el.addEventListener('click', () => location.hash = `#/prep/${el.dataset.oppNav}`)
+  );
+}
+
+function oppRow(opp) {
+  const run = opp.latest_sync_run;
+  const running = run?.status === 'running';
+  const initials = opp.name.trim().slice(0, 2).toUpperCase();
+  const platforms = [
+    opp.lichess_username ? `⚡ ${esc(opp.lichess_username)}` : '',
+    opp.chesscom_username ? `♟ ${esc(opp.chesscom_username)}` : '',
+  ].filter(Boolean).join(' · ');
+  const wCount = opp.mistake_count_white || 0;
+  const bCount = opp.mistake_count_black || 0;
+  const mistakeInfo = (wCount + bCount) > 0
+    ? `${wCount} white · ${bCount} black mistakes`
+    : opp.last_synced_at ? 'No mistakes found' : 'Not yet analyzed';
+  const syncedInfo = opp.last_synced_at ? `· Synced ${timeAgo(opp.last_synced_at)}` : '';
+
+  return `
+    <div class="opp-row" data-opp-nav="${opp.id}">
+      <div class="opp-avatar">${esc(initials)}</div>
+      <div class="opp-info">
+        <div class="opp-name">${esc(opp.name)}</div>
+        <div class="opp-meta">${platforms} ${syncedInfo}</div>
+        <div class="opp-meta">${mistakeInfo}
+          ${running ? `<span class="badge badge-blue" style="margin-left:6px">Syncing…</span>` : ''}
+          ${run?.status === 'error' ? `<span class="badge badge-red" style="margin-left:6px" title="${esc(run.error||'')}">Error</span>` : ''}
+        </div>
+      </div>
+      <div class="opp-actions">
+        <button class="btn btn-secondary btn-sm" data-opp-sync="${opp.id}" ${running ? 'disabled' : ''}>
+          ${running ? '<span class="spinner"></span>' : '↺ Sync'}
+        </button>
+        <button class="btn-icon" data-opp-del="${opp.id}" title="Delete opponent">✕</button>
+      </div>
+    </div>
+  `;
+}
+
+async function doCreateOpponent() {
+  const name = document.getElementById('opp-name')?.value.trim();
+  const lichess = document.getElementById('opp-lichess')?.value.trim();
+  const chesscom = document.getElementById('opp-chesscom')?.value.trim();
+  if (!name) { toast('Enter a name', 'error'); return; }
+  if (!lichess && !chesscom) { toast('Enter at least one username', 'error'); return; }
+  try {
+    const result = await POST('/opponents', { name, lichess_username: lichess || null, chesscom_username: chesscom || null });
+    toast(`${name} added`, 'success');
+    await doSyncOpponent(result.opponent_id, false);
+    renderPrep();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function doSyncOpponent(opponentId, notify = true) {
+  try {
+    await POST(`/opponents/${opponentId}/sync`, { max_games: 500 });
+    if (notify) toast('Syncing opponent games…', 'info');
+    renderPrep();
+    pollOpponentSync(opponentId);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function doDeleteOpponent(opponentId) {
+  const opp = Prep.opponents.find(o => o.id === opponentId);
+  if (!confirm(`Delete ${opp?.name || 'this opponent'} and all their data?`)) return;
+  try {
+    await DEL(`/opponents/${opponentId}`);
+    toast('Opponent deleted', 'success');
+    renderPrep();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function pollOpponentSync(opponentId) {
+  const key = `opp-${opponentId}`;
+  if (S.pollIds[key]) clearInterval(S.pollIds[key]);
+  S.pollIds[key] = setInterval(async () => {
+    try {
+      const data = await GET(`/opponents/${opponentId}/status`);
+      const run = data.latest_run;
+      const hash = location.hash.replace(/^#/, '') || '/';
+      if (hash === '/prep') renderPrep();
+      else if (hash === `/prep/${opponentId}`) renderPrepDetail(opponentId);
+      if (!run || run.status !== 'running') {
+        clearInterval(S.pollIds[key]);
+        delete S.pollIds[key];
+        if (run?.status === 'done') {
+          toast(`Sync complete: ${run.games_new} games fetched`, 'success');
+          if (hash === '/prep') renderPrep();
+          else if (hash === `/prep/${opponentId}`) renderPrepDetail(opponentId);
+        } else if (run?.status === 'error') {
+          toast(run.error || 'Sync failed', 'error');
+        }
+      }
+    } catch { /* ignore */ }
+  }, 2500);
+}
+
+async function renderPrepDetail(opponentId) {
+  // Load opponent + mistakes
+  try {
+    const [oppData, mistakeData] = await Promise.all([
+      GET(`/opponents/${opponentId}`),
+      GET(`/opponents/${opponentId}/mistakes`),
+    ]);
+    Prep.detail = oppData.opponent;
+    Prep.mistakes = mistakeData;
+    Prep.idx = 0;
+  } catch (err) {
+    setApp(`<div class="page"><div class="empty"><p>Failed to load opponent data.</p></div></div>`);
+    return;
+  }
+
+  const opp = Prep.detail;
+  const run = opp.latest_sync_run;
+  const running = run?.status === 'running';
+  const mistakes = Prep.mistakes[Prep.color] || [];
+
+  setApp(`
+    <div class="page" id="prep-detail-view">
+      <div class="prep-detail-header">
+        <button class="btn btn-ghost prep-back-btn" id="prep-back">← Back</button>
+        <div class="prep-detail-title">
+          <h1>${esc(opp.name)}</h1>
+          <p>${[
+            opp.lichess_username ? `⚡ ${esc(opp.lichess_username)}` : '',
+            opp.chesscom_username ? `♟ ${esc(opp.chesscom_username)}` : '',
+          ].filter(Boolean).join(' · ')}
+          ${opp.last_synced_at ? `· Synced ${timeAgo(opp.last_synced_at)}` : '· Not yet synced'}</p>
+        </div>
+        <button id="prep-sync-btn" class="btn btn-secondary btn-sm" ${running ? 'disabled' : ''}>
+          ${running ? '<span class="spinner"></span> Syncing' : '↺ Re-sync'}
+        </button>
+      </div>
+
+      ${running ? `
+        <div class="warning-banner" style="margin-bottom:16px">
+          Fetching and analyzing ${esc(opp.name)}'s games… results will appear when done.
+        </div>
+      ` : ''}
+
+      <div class="analysis-metrics" style="margin-bottom:16px">
+        ${metricCard(Prep.mistakes.white_count || 0, 'White mistakes', '')}
+        ${metricCard(Prep.mistakes.black_count || 0, 'Black mistakes', '')}
+        ${metricCard(
+          mistakes.length ? Math.round(mistakes.reduce((s, m) => s + m.avg_cp_loss, 0) / mistakes.length) + 'cp' : '—',
+          'Avg loss', ''
+        )}
+      </div>
+
+      <div class="prep-color-tabs">
+        <button class="prep-color-tab ${Prep.color === 'white' ? 'active' : ''}" data-prep-color="white">♔ As White</button>
+        <button class="prep-color-tab ${Prep.color === 'black' ? 'active' : ''}" data-prep-color="black">♚ As Black</button>
+      </div>
+
+      ${mistakes.length === 0 ? `
+        <div class="empty">
+          <p>${opp.last_synced_at ? `No ${Prep.color} mistakes found for ${esc(opp.name)}.` : `Sync ${esc(opp.name)}'s games to find their weaknesses.`}</p>
+        </div>
+      ` : `
+        <div class="prep-grid">
+          <div class="list-panel">
+            <div class="list-panel-head">
+              <h2>Weaknesses</h2>
+              <span id="prep-count" class="badge badge-default">${mistakes.length}</span>
+            </div>
+            <div class="mistake-list" id="prep-mlist">
+              ${mistakes.map((m, i) => prepMistakeRow(m, i)).join('')}
+            </div>
+          </div>
+          <div>
+            <div class="board-card">
+              <div id="prep-board-wrap" class="board-wrap"></div>
+            </div>
+            <div class="detail-card" id="prep-detail"></div>
+          </div>
+        </div>
+      `}
+    </div>
+  `);
+
+  document.getElementById('prep-back').addEventListener('click', () => { location.hash = '#/prep'; });
+  document.getElementById('prep-sync-btn').addEventListener('click', () => doSyncOpponent(opponentId));
+
+  document.querySelectorAll('[data-prep-color]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      Prep.color = btn.dataset.prepColor;
+      Prep.idx = 0;
+      renderPrepDetail(opponentId);
+    })
+  );
+
+  document.querySelectorAll('[data-prep-i]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      Prep.idx = Number(btn.dataset.prepI);
+      selectPrepMistake(opponentId);
+    })
+  );
+
+  if (mistakes.length > 0) {
+    selectPrepMistake(opponentId, true);
+  }
+}
+
+function prepMistakeRow(m, i) {
+  const severity = severityData(m.avg_cp_loss);
+  const san = uciToSan(m.fen, m.user_move);
+  return `
+    <button class="mistake-row ${i === Prep.idx ? 'active' : ''}" data-prep-i="${i}">
+      <span class="mistake-rank">${i + 1}</span>
+      <div class="mistake-copy">
+        <span class="mistake-move">${esc(san)} <span class="pill ${severity.pill}">${severity.label}</span></span>
+        <span class="mistake-opening">${esc(m.opening_name || 'Unknown opening')}${m.opening_eco ? ` · ${esc(m.opening_eco)}` : ''}</span>
+      </div>
+      <div class="mistake-meta">
+        <span class="pill pill-cp">−${m.avg_cp_loss}cp</span>
+        <span class="pill pill-freq">${m.pair_count}×</span>
+      </div>
+    </button>
+  `;
+}
+
+function selectPrepMistake(_opponentId, init = false) {
+  const mistakes = Prep.mistakes?.[Prep.color] || [];
+  const mistake = mistakes[Prep.idx];
+  if (!mistake) return;
+
+  // Highlight active row
+  document.querySelectorAll('[data-prep-i]').forEach((el, i) =>
+    el.classList.toggle('active', i === Prep.idx)
+  );
+
+  const severity = severityData(mistake.avg_cp_loss);
+  const san = uciToSan(mistake.fen, mistake.user_move);
+  const topSans = (mistake.top_moves || []).slice(0, 3).map(mv => ({
+    uci: mv, san: uciToSan(mistake.fen, mv),
+  }));
+  const sans = moveListToSan(mistake.move_list);
+
+  const detail = document.getElementById('prep-detail');
+  if (detail) {
+    detail.innerHTML = `
+      <div class="detail-stack">
+        <div class="detail-head">
+          <div>
+            <div class="detail-move">${esc(san)}</div>
+            <div class="detail-sub">Played ${mistake.pair_count}× · recurring mistake</div>
+          </div>
+          <span class="pill ${severity.pill}">${severity.label}</span>
+        </div>
+        ${mistake.opening_name ? `
+          <div class="detail-opening">
+            ${mistake.opening_eco ? `<span class="eco">${esc(mistake.opening_eco)}</span>` : ''}
+            ${esc(mistake.opening_name)}
+          </div>` : ''}
+        ${sans.length ? `<div class="moves-path">${formatMoveList(sans)}</div>` : ''}
+        <div class="detail-metrics">
+          <div class="dm"><span>Cp loss</span><strong>−${mistake.avg_cp_loss}</strong></div>
+          <div class="dm"><span>Frequency</span><strong>${mistake.pair_count}×</strong></div>
+        </div>
+        <div>
+          <p class="section-head">Better moves</p>
+          <div class="move-chips">
+            ${topSans.map(mv => `<span class="move-chip">${esc(mv.san)}</span>`).join('')}
+          </div>
+        </div>
+        <div class="detail-actions" style="margin-top:8px">
+          <a href="https://lichess.org/analysis/${encodeURIComponent(mistake.fen)}" target="_blank" rel="noopener"
+             class="btn btn-secondary btn-sm">Analyze on Lichess</a>
+        </div>
+      </div>
+    `;
+  }
+
+  // Board
+  const wrap = document.getElementById('prep-board-wrap');
+  if (!wrap) return;
+
+  const chess = new Chess();
+  try { chess.load(mistake.fen); } catch { return; }
+
+  const orientation = Prep.color === 'white' ? 'black' : 'white'; // opponent's color flipped for prep
+  const playedMove = mistake.user_move;
+  const bestMove = mistake.top_moves?.[0];
+
+  const shapes = [];
+  if (playedMove && playedMove.length >= 4) {
+    shapes.push({ orig: playedMove.slice(0, 2), dest: playedMove.slice(2, 4), brush: 'red' });
+  }
+  if (bestMove && bestMove.length >= 4 && bestMove !== playedMove) {
+    shapes.push({ orig: bestMove.slice(0, 2), dest: bestMove.slice(2, 4), brush: 'green' });
+  }
+
+  if (Prep.ground && !init) {
+    Prep.ground.set({
+      fen: mistake.fen,
+      orientation,
+      movable: { color: undefined, dests: new Map() },
+      drawable: { shapes },
+    });
+  } else {
+    if (Prep.ground) { try { Prep.ground.destroy(); } catch { /* */ } }
+    Prep.ground = Chessground(wrap, {
+      fen: mistake.fen,
+      orientation,
+      movable: { color: undefined, free: false, dests: new Map() },
+      draggable: { enabled: false },
+      drawable: { enabled: true, visible: true, shapes },
+    });
+  }
 }

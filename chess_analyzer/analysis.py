@@ -20,7 +20,7 @@ import os
 
 ANALYSIS_DEPTH   = int(os.environ.get("ANALYSIS_DEPTH",        "6"))   # tuned for fast opening triage
 OPENING_PLIES    = int(os.environ.get("OPENING_PLIES_LIMIT",   "16"))
-THRESHOLD_CP     = int(os.environ.get("MISTAKE_THRESHOLD_CP",  "120"))
+THRESHOLD_CP     = int(os.environ.get("MISTAKE_THRESHOLD_CP",  "50"))
 MIN_OCCURRENCES  = int(os.environ.get("MIN_PAIR_OCCURRENCES",  "2"))
 MULTIPV          = int(os.environ.get("MULTIPV",               "2"))   # enough for fast opening blunder detection
 TOP_MOVE_DELTA   = int(os.environ.get("TOP_MOVE_THRESHOLD_CP", "35"))

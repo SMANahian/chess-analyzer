@@ -204,6 +204,78 @@ def sync_in_background(config_id: int, max_games: Optional[int] = None, full_res
     threading.Thread(target=_sync_task, args=(config_id, max_games, full_resync), daemon=True).start()
 
 
+def sync_opponent_in_background(opponent_id: int, max_games: int = 500) -> None:
+    threading.Thread(target=_opponent_sync_task, args=(opponent_id, max_games), daemon=True).start()
+
+
+def _opponent_sync_task(opponent_id: int, max_games: int) -> None:
+    run_id = db.start_opponent_sync_run(opponent_id)
+    try:
+        opponent = db.get_opponent(opponent_id)
+        if not opponent:
+            raise ValueError(f"Opponent {opponent_id} not found")
+
+        details: dict[str, Any] = {"games_fetched": 0, "analysis_status": "fetching"}
+        pgn_by_color: dict[str, list[str]] = {"white": [], "black": []}
+        total_fetched = 0
+
+        per_color_limit = max(50, max_games // 2)
+
+        if opponent.get("lichess_username"):
+            for color in ("white", "black"):
+                for batch in iter_lichess_pgn_batches(
+                    opponent["lichess_username"], color,
+                    since_ms=None, max_games=per_color_limit,
+                ):
+                    if batch.get("pgn_text"):
+                        pgn_by_color[color].append(batch["pgn_text"])
+                    total_fetched += batch.get("raw_count", 0)
+                    details["games_fetched"] = total_fetched
+                    db.update_opponent_sync_run(run_id, details=details)
+
+        if opponent.get("chesscom_username"):
+            for color in ("white", "black"):
+                known: set[str] = set()
+                for batch in iter_chesscom_pgn_batches(
+                    opponent["chesscom_username"], color,
+                    known, max_games=per_color_limit,
+                ):
+                    if batch.get("pgn_text"):
+                        pgn_by_color[color].append(batch["pgn_text"])
+                    total_fetched += batch.get("raw_count", 0)
+                    details["games_fetched"] = total_fetched
+                    db.update_opponent_sync_run(run_id, details=details)
+
+        details["analysis_status"] = "analyzing"
+        db.update_opponent_sync_run(run_id, details=details)
+
+        for color in ("white", "black"):
+            parts = pgn_by_color[color]
+            if not parts:
+                continue
+            pgn_text = "\n\n".join(parts)
+            mistakes = analysis.analyze(pgn_text, color)
+            db.replace_opponent_mistakes(opponent_id, color, mistakes)
+            details[f"mistakes_{color}"] = len(mistakes)
+
+        db.update_opponent_last_synced(opponent_id)
+        details["analysis_status"] = "done"
+        db.finish_opponent_sync_run(run_id, games_new=total_fetched, details=details)
+        db.log_event(
+            "sync",
+            f"Opponent sync finished for opponent {opponent_id}",
+            details={"opponent_id": opponent_id, "run_id": run_id, "details": details},
+        )
+    except Exception as exc:
+        db.finish_opponent_sync_run(run_id, games_new=0, error=str(exc), details=None)
+        db.log_event(
+            "sync",
+            f"Opponent sync failed for opponent {opponent_id}",
+            level="error",
+            details={"opponent_id": opponent_id, "run_id": run_id, "error": str(exc)},
+        )
+
+
 def _sync_task(config_id: int, max_games: Optional[int] = None, full_resync: bool = False) -> None:
     run_id = db.start_sync_run(config_id)
     stream_ctx: Optional[dict[str, Any]] = None
