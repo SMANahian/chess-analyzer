@@ -214,7 +214,7 @@ function renderGames() {
         <div class="onboarding">
           <div class="onboard-hero">
             <h1>Analyze your opening mistakes</h1>
-            <p>Connect your Lichess or Chess.com account. Stockfish finds recurring mistakes in your openings — then you drill them until they stick.</p>
+            <p>Enter your username and Stockfish will find recurring mistakes in your openings — then drill them until they stick.</p>
           </div>
 
           <div class="platform-grid">
@@ -227,14 +227,8 @@ function renderGames() {
                 </div>
               </div>
               <div class="connect-row">
-                <span class="connect-label">♔ White</span>
-                <input id="input-lichess-white" type="text" placeholder="Your username" class="field field-sm" />
-                <button id="btn-save-lichess-white" class="btn btn-primary btn-sm">Connect</button>
-              </div>
-              <div class="connect-row">
-                <span class="connect-label">♚ Black</span>
-                <input id="input-lichess-black" type="text" placeholder="Your username" class="field field-sm" />
-                <button id="btn-save-lichess-black" class="btn btn-primary btn-sm">Connect</button>
+                <input id="input-lichess-both" type="text" placeholder="Your Lichess username" class="field" />
+                <button id="btn-save-lichess-both" class="btn btn-primary">Connect</button>
               </div>
             </div>
 
@@ -247,19 +241,13 @@ function renderGames() {
                 </div>
               </div>
               <div class="connect-row">
-                <span class="connect-label">♔ White</span>
-                <input id="input-chesscom-white" type="text" placeholder="Your username" class="field field-sm" />
-                <button id="btn-save-chesscom-white" class="btn btn-primary btn-sm">Connect</button>
-              </div>
-              <div class="connect-row">
-                <span class="connect-label">♚ Black</span>
-                <input id="input-chesscom-black" type="text" placeholder="Your username" class="field field-sm" />
-                <button id="btn-save-chesscom-black" class="btn btn-primary btn-sm">Connect</button>
+                <input id="input-chesscom-both" type="text" placeholder="Your Chess.com username" class="field" />
+                <button id="btn-save-chesscom-both" class="btn btn-primary">Connect</button>
               </div>
             </div>
           </div>
 
-          <div class="onboard-or">or upload PGN files directly</div>
+          <div class="onboard-or">or upload PGN files (white/black separately)</div>
           <div class="pgn-row">
             <button class="btn btn-secondary" id="upload-white-btn">♔ Upload White PGN</button>
             <input type="file" id="file-white" accept=".pgn" class="hidden" />
@@ -313,15 +301,7 @@ function renderGames() {
           ${colorCard('black', colors.black || {})}
         </div>
 
-        ${S.syncConfigs.length ? `
-          <div class="card" style="margin-bottom:16px">
-            <div class="card-head">
-              <h2>Sync sources</h2>
-              <span class="badge badge-default">${S.syncConfigs.length} configured</span>
-            </div>
-            <div class="sync-list">${S.syncConfigs.map(syncConfigRow).join('')}</div>
-          </div>
-        ` : ''}
+        ${accountsCard()}
 
         <div class="card">
           <div class="card-head"><h2>Data</h2></div>
@@ -336,11 +316,22 @@ function renderGames() {
     `);
   }
 
-  // Event listeners — work in both onboarding and dashboard mode
+  // Event listeners — onboarding: unified platform connect
+  document.getElementById('btn-save-lichess-both')?.addEventListener('click', () => saveSyncConfigBoth('lichess'));
+  document.getElementById('btn-save-chesscom-both')?.addEventListener('click', () => saveSyncConfigBoth('chesscom'));
+  document.getElementById('input-lichess-both')?.addEventListener('keydown', evt => {
+    if (evt.key === 'Enter') saveSyncConfigBoth('lichess');
+  });
+  document.getElementById('input-chesscom-both')?.addEventListener('keydown', evt => {
+    if (evt.key === 'Enter') saveSyncConfigBoth('chesscom');
+  });
+
+  // Dashboard: accounts card — add new platform
+  document.getElementById('btn-save-lichess-new')?.addEventListener('click', () => saveSyncConfigBoth('lichess', 'accounts-lichess-input'));
+  document.getElementById('btn-save-chesscom-new')?.addEventListener('click', () => saveSyncConfigBoth('chesscom', 'accounts-chesscom-input'));
+
+  // Dashboard: PGN drop zones and color-specific controls
   ['white', 'black'].forEach(color => {
-    document.querySelectorAll(`[data-tab-group="${color}"]`).forEach(btn =>
-      btn.addEventListener('click', () => switchTab(color, btn.dataset.tab))
-    );
     const zone = document.getElementById(`zone-${color}`);
     const input = document.getElementById(`file-${color}`);
     if (zone && input) {
@@ -357,8 +348,6 @@ function renderGames() {
       input.addEventListener('change', () => { if (input.files[0]) doUpload(color, input.files[0]); });
     }
     document.getElementById(`upload-${color}-btn`)?.addEventListener('click', () => input?.click());
-    document.getElementById(`btn-save-lichess-${color}`)?.addEventListener('click', () => saveSyncConfig(color, 'lichess'));
-    document.getElementById(`btn-save-chesscom-${color}`)?.addEventListener('click', () => saveSyncConfig(color, 'chesscom'));
     document.getElementById(`btn-analyze-${color}`)?.addEventListener('click', () => doAnalyze(color));
     document.getElementById(`btn-cancel-${color}`)?.addEventListener('click', () => doCancelAnalysis(color));
     document.getElementById(`depth-select-${color}`)?.addEventListener('change', async evt => {
@@ -371,18 +360,37 @@ function renderGames() {
     });
   });
 
-  document.querySelectorAll('[data-toggle-opts]').forEach(btn =>
+  // Grouped account row controls
+  document.querySelectorAll('[data-toggle-opts-grp]').forEach(btn =>
     btn.addEventListener('click', () => {
-      const opts = document.getElementById(`sync-opts-${btn.dataset.toggleOpts}`);
+      const opts = document.getElementById(`sync-opts-grp-${btn.dataset.toggleOptsGrp}`);
       if (opts) opts.style.display = opts.style.display === 'none' ? 'flex' : 'none';
     })
   );
-  document.querySelectorAll('[data-resync]').forEach(btn =>
-    btn.addEventListener('click', () => doResync(Number(btn.dataset.resync)))
+  document.querySelectorAll('[data-resync-grp]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const ids = btn.dataset.resyncGrp.split(',').map(Number);
+      const maxInput = document.getElementById(`sync-max-grp-${ids[0]}`);
+      const fullInput = document.getElementById(`sync-full-grp-${ids[0]}`);
+      const maxGames = maxInput ? (parseInt(maxInput.value, 10) || 0) : 0;
+      const fullResync = fullInput ? fullInput.checked : false;
+      ids.forEach(id => doResyncWith(id, maxGames, fullResync));
+    })
   );
-  document.querySelectorAll('[data-delsync]').forEach(btn =>
-    btn.addEventListener('click', () => doDeleteSync(Number(btn.dataset.delsync)))
+  document.querySelectorAll('[data-delsync-grp]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const ids = btn.dataset.delsyncGrp.split(',').map(Number);
+      doDeleteSyncGroup(ids);
+    })
   );
+
+  // Account add inputs — Enter key support
+  document.getElementById('accounts-lichess-input')?.addEventListener('keydown', evt => {
+    if (evt.key === 'Enter') saveSyncConfigBoth('lichess', 'accounts-lichess-input');
+  });
+  document.getElementById('accounts-chesscom-input')?.addEventListener('keydown', evt => {
+    if (evt.key === 'Enter') saveSyncConfigBoth('chesscom', 'accounts-chesscom-input');
+  });
 
   document.getElementById('btn-export')?.addEventListener('click', doExport);
   document.getElementById('btn-import')?.addEventListener('click', () => document.getElementById('import-file')?.click());
@@ -399,8 +407,6 @@ function colorCard(color, info) {
   const icon = color === 'white' ? '♔' : '♚';
   const hasGames = (info.game_count || 0) > 0;
   const statusHtml = analysisStatusBlock(color, info);
-  const lichessCfg = S.syncConfigs.find(cfg => cfg.color === color && cfg.platform === 'lichess');
-  const chessComCfg = S.syncConfigs.find(cfg => cfg.color === color && cfg.platform === 'chesscom');
 
   return `
     <div class="color-card ${color}">
@@ -413,29 +419,12 @@ function colorCard(color, info) {
       </div>
 
       <div class="color-card-body">
-        <div class="tab-strip" role="tablist">
-          <button class="tab-btn active" data-tab-group="${color}" data-tab="file">📄 File</button>
-          <button class="tab-btn" data-tab-group="${color}" data-tab="lichess">⚡ Lichess</button>
-          <button class="tab-btn" data-tab-group="${color}" data-tab="chesscom">♟ Chess.com</button>
+        <div id="zone-${color}" class="drop-zone">
+          <input type="file" id="file-${color}" accept=".pgn" class="hidden" />
+          <div class="drop-zone-icon">${hasGames ? '🔄' : '📂'}</div>
+          <div class="drop-zone-title">${hasGames ? 'Replace ${cap} PGN' : 'Drop a PGN file here'}</div>
+          <p>${hasGames ? 'Drop a new file or click to browse' : 'Upload a PGN exported from any platform'}</p>
         </div>
-
-        <div id="tab-${color}-file" class="tab-pane">
-          <div id="zone-${color}" class="drop-zone">
-            <input type="file" id="file-${color}" accept=".pgn" class="hidden" />
-            <div class="drop-zone-icon">${hasGames ? '🔄' : '📂'}</div>
-            <div class="drop-zone-title">${hasGames ? 'Replace PGN' : 'Drop a PGN file here'}</div>
-            <p>${hasGames ? 'Drop a new file or click to browse' : 'Supports PGN files from any platform'}</p>
-          </div>
-        </div>
-
-        <div id="tab-${color}-lichess" class="tab-pane hidden">
-          ${syncInputPanel(color, 'lichess', lichessCfg)}
-        </div>
-
-        <div id="tab-${color}-chesscom" class="tab-pane hidden">
-          ${syncInputPanel(color, 'chesscom', chessComCfg)}
-        </div>
-
         <div id="color-status-${color}">${statusHtml}</div>
       </div>
     </div>
@@ -494,28 +483,6 @@ function analysisStatusBlock(color, info) {
   `;
 }
 
-function syncDetailBits(cfg) {
-  const run = cfg?.latest_run;
-  const details = run?.details || {};
-  const bits = [];
-  if (cfg?.last_synced_at) bits.push(`Last synced ${timeAgo(cfg.last_synced_at)}`);
-  if (run?.status === 'running') {
-    const fetched = details.fetched_ids || 0;
-    const stored = details.total_games_after_merge || 0;
-    bits.push(`fetching ${fetched}`);
-    bits.push(`${stored} games usable now`);
-    if (details.analysis_streaming && details.analysis_total) {
-      bits.push(`analysis ${details.analysis_progress || 0}/${details.analysis_total}`);
-    }
-  } else {
-    if (run?.status === 'done') bits.push(`+${run.games_new} new ids`);
-    if (details.total_games_after_merge) bits.push(`${details.total_games_after_merge} total games`);
-  }
-  if (details.supported_new_games) bits.push(`${details.supported_new_games} supported new`);
-  if (details.pages_fetched) bits.push(`${details.pages_fetched} page(s) fetched`);
-  if (details.archives_scanned) bits.push(`${details.archives_scanned} archive month(s) scanned`);
-  return bits;
-}
 
 function syncProgressMarkup(run) {
   const details = run?.details || {};
@@ -531,85 +498,97 @@ function syncProgressMarkup(run) {
   `;
 }
 
-function syncInputPanel(color, platform, cfg) {
-  const run = cfg?.latest_run;
-  const placeholder = platform === 'lichess' ? 'Lichess username' : 'Chess.com username';
-  const detailBits = syncDetailBits(cfg);
+function accountsCard() {
+  const lichessConfigs = S.syncConfigs.filter(c => c.platform === 'lichess');
+  const chesscomConfigs = S.syncConfigs.filter(c => c.platform === 'chesscom');
+  const anyRunning = S.syncConfigs.some(c => c.latest_run?.status === 'running');
 
-  return `
-    <div>
-      <div class="sync-field-row">
-        <input
-          id="input-${platform}-${color}"
-          type="text"
-          value="${esc(cfg?.username || '')}"
-          placeholder="${placeholder}"
-          class="field field-sm"
-        />
-        <button id="btn-save-${platform}-${color}" class="btn btn-secondary btn-sm" ${run?.status === 'running' ? 'disabled' : ''}>
-          ${cfg ? 'Save & sync' : 'Connect'}
-        </button>
-      </div>
-      <p class="field-help">
-        ${cfg ? detailBits.join(' · ') || 'Connected' : 'Stores games locally — only fetches new games on later syncs.'}
-      </p>
-      ${syncProgressMarkup(run)}
-      ${run?.status === 'error' ? `<p class="error-text">${esc(run.error || 'sync failed')}</p>` : ''}
-    </div>
-  `;
-}
+  // Group by username so white+black for the same account show as one row
+  const grouped = {};
+  for (const cfg of S.syncConfigs) {
+    const key = `${cfg.platform}:${cfg.username}`;
+    if (!grouped[key]) grouped[key] = { platform: cfg.platform, username: cfg.username, configs: [] };
+    grouped[key].configs.push(cfg);
+  }
 
-function syncConfigRow(cfg) {
-  const run = cfg.latest_run;
-  const platformIcon = cfg.platform === 'lichess' ? '⚡' : '♟';
-  const colorIcon = cfg.color === 'white' ? '♔' : '♚';
-  const running = run?.status === 'running';
-  const bits = syncDetailBits(cfg);
-  const hasHistory = !!(cfg.last_synced_at || run);
-
-  return `
-    <div class="sync-row" id="sync-row-${cfg.id}">
-      <span class="sync-icon">${platformIcon}</span>
-      <div class="sync-row-body">
-        <strong>${colorIcon} ${esc(cfg.username)}</strong>
-        <p>${cfg.platform} · ${bits.join(' · ') || 'ready to sync'}</p>
-        ${running ? syncProgressMarkup(run) : ''}
-        <div class="sync-options" id="sync-opts-${cfg.id}" style="display:none">
-          <label class="sync-opt-label">Max games
-            <input type="number" class="field field-sm sync-max-games" id="sync-max-${cfg.id}"
-              placeholder="5000" min="100" max="50000" step="100" value="5000" style="width:90px;margin-left:6px" />
-          </label>
-          ${cfg.platform === 'lichess' && hasHistory ? `
-            <label class="sync-opt-label" style="margin-left:12px">
-              <input type="checkbox" id="sync-full-${cfg.id}" />
-              Full re-sync (fetch all history)
+  const rows = Object.values(grouped).map(g => {
+    const icon = g.platform === 'lichess' ? '⚡' : '♟';
+    const running = g.configs.some(c => c.latest_run?.status === 'running');
+    const hasError = g.configs.some(c => c.latest_run?.status === 'error');
+    const lastSynced = g.configs.map(c => c.last_synced_at).filter(Boolean).sort().pop();
+    const totalNew = g.configs.reduce((s, c) => s + (c.latest_run?.games_new || 0), 0);
+    // Use any config id for sync/delete actions (both colors get the same username)
+    const cfgIds = g.configs.map(c => c.id);
+    return `
+      <div class="sync-row">
+        <span class="sync-icon">${icon}</span>
+        <div class="sync-row-body">
+          <strong>${esc(g.username)}</strong>
+          <p>${g.platform}${lastSynced ? ` · synced ${timeAgo(lastSynced)}` : ' · not yet synced'}</p>
+          ${running ? syncProgressMarkup(g.configs.find(c => c.latest_run?.status === 'running')?.latest_run) : ''}
+          <div class="sync-options" id="sync-opts-grp-${cfgIds[0]}" style="display:none">
+            <label class="sync-opt-label">Max games
+              <input type="number" class="field field-sm" id="sync-max-grp-${cfgIds[0]}"
+                placeholder="5000" min="100" max="50000" step="100" value="5000" style="width:90px;margin-left:6px" />
             </label>
-          ` : ''}
+            ${g.platform === 'lichess' && lastSynced ? `
+              <label class="sync-opt-label" style="margin-left:12px">
+                <input type="checkbox" id="sync-full-grp-${cfgIds[0]}" />
+                Full re-sync
+              </label>` : ''}
+          </div>
         </div>
+        <div class="sync-row-side">
+          ${running ? `<span class="badge badge-blue">Fetching</span>` : ''}
+          ${hasError ? `<span class="badge badge-red">Error</span>` : ''}
+          ${!running && !hasError && totalNew > 0 ? `<span class="badge badge-green">+${totalNew}</span>` : ''}
+          <button class="btn-icon" data-toggle-opts-grp="${cfgIds[0]}" title="Sync options" ${running ? 'disabled' : ''}>⚙</button>
+          <button class="btn-icon" data-resync-grp="${cfgIds.join(',')}" title="Sync now" ${running ? 'disabled' : ''}>
+            ${running ? '<span class="spinner"></span>' : '↺'}
+          </button>
+          <button class="btn-icon" data-delsync-grp="${cfgIds.join(',')}" title="Remove">✕</button>
+        </div>
+      </div>`;
+  });
+
+  const hasLichess = lichessConfigs.length > 0;
+  const hasChesscom = chesscomConfigs.length > 0;
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head">
+        <h2>Accounts</h2>
+        ${S.syncConfigs.length ? `<span class="badge badge-default">${Object.keys(grouped).length} connected</span>` : ''}
       </div>
-      <div class="sync-row-side">
-        ${run?.status === 'done'    ? `<span class="badge badge-green">+${run.games_new}</span>` : ''}
-        ${run?.status === 'running' ? `<span class="badge badge-blue">Fetching</span>` : ''}
-        ${run?.status === 'error'   ? `<span class="badge badge-red" title="${esc(run.error || '')}">Error</span>` : ''}
-        <button class="btn-icon" data-toggle-opts="${cfg.id}" title="Sync options" ${running ? 'disabled' : ''}>⚙</button>
-        <button class="btn-icon" data-resync="${cfg.id}" title="Sync now" ${running ? 'disabled' : ''}>
-          ${running ? '<span class="spinner"></span>' : '↺'}
-        </button>
-        <button class="btn-icon" data-delsync="${cfg.id}" title="Remove">✕</button>
+      ${rows.length ? `<div class="sync-list" style="margin-bottom:12px">${rows.join('')}</div>` : ''}
+      <div class="accounts-add-row">
+        ${!hasLichess ? `
+          <div class="accounts-platform-row">
+            <span class="sync-icon">⚡</span>
+            <input id="accounts-lichess-input" type="text" placeholder="Lichess username" class="field field-sm" />
+            <button id="btn-save-lichess-new" class="btn btn-primary btn-sm" ${anyRunning ? 'disabled' : ''}>Connect</button>
+          </div>` : `
+          <div class="accounts-platform-row">
+            <span class="sync-icon">⚡</span>
+            <input id="accounts-lichess-input" type="text" placeholder="Add another Lichess username" class="field field-sm" />
+            <button id="btn-save-lichess-new" class="btn btn-secondary btn-sm" ${anyRunning ? 'disabled' : ''}>Add</button>
+          </div>`}
+        ${!hasChesscom ? `
+          <div class="accounts-platform-row">
+            <span class="sync-icon">♟</span>
+            <input id="accounts-chesscom-input" type="text" placeholder="Chess.com username" class="field field-sm" />
+            <button id="btn-save-chesscom-new" class="btn btn-primary btn-sm" ${anyRunning ? 'disabled' : ''}>Connect</button>
+          </div>` : `
+          <div class="accounts-platform-row">
+            <span class="sync-icon">♟</span>
+            <input id="accounts-chesscom-input" type="text" placeholder="Add another Chess.com username" class="field field-sm" />
+            <button id="btn-save-chesscom-new" class="btn btn-secondary btn-sm" ${anyRunning ? 'disabled' : ''}>Add</button>
+          </div>`}
       </div>
-    </div>
-  `;
+    </div>`;
 }
 
-function switchTab(color, tab) {
-  document.querySelectorAll(`[data-tab-group="${color}"]`).forEach(btn =>
-    btn.classList.toggle('active', btn.dataset.tab === tab)
-  );
-  ['file', 'lichess', 'chesscom'].forEach(name => {
-    const pane = document.getElementById(`tab-${color}-${name}`);
-    if (pane) pane.classList.toggle('hidden', name !== tab);
-  });
-}
+
 
 async function doUpload(color, file) {
   const fd = new FormData();
@@ -624,35 +603,41 @@ async function doUpload(color, file) {
   }
 }
 
-async function saveSyncConfig(color, platform) {
-  const input = document.getElementById(`input-${platform}-${color}`);
+async function saveSyncConfigBoth(platform, inputId = null) {
+  const id = inputId || `input-${platform}-both`;
+  const input = document.getElementById(id);
   const username = input?.value.trim();
   if (!username) {
-    toast('Enter a username before saving', 'error');
+    toast('Enter a username', 'error');
     return;
   }
   try {
-    const result = await POST('/sync', { color, platform, username });
-    await POST(`/sync/${result.config_id}/run`);
+    // Connect both white and black for this username+platform
+    const [resW, resB] = await Promise.all([
+      POST('/sync', { color: 'white', platform, username }),
+      POST('/sync', { color: 'black', platform, username }),
+    ]);
+    await Promise.all([
+      POST(`/sync/${resW.config_id}/run`),
+      POST(`/sync/${resB.config_id}/run`),
+    ]);
     toast(`Syncing ${platform} games for ${username}`, 'info');
+    if (input) input.value = '';
     await refreshAll();
     renderGames();
-    pollSync(result.config_id);
+    pollSync(resW.config_id);
+    pollSync(resB.config_id);
   } catch (err) {
     toast(err.message, 'error');
   }
 }
 
-async function doResync(configId) {
+async function doResyncWith(configId, maxGames = 0, fullResync = false) {
   try {
     const cfg = S.syncConfigs.find(item => item.id === configId);
-    const maxInput = document.getElementById(`sync-max-${configId}`);
-    const fullInput = document.getElementById(`sync-full-${configId}`);
-    const maxGames = maxInput ? (parseInt(maxInput.value, 10) || 0) : 0;
-    const fullResync = fullInput ? fullInput.checked : false;
     await POST(`/sync/${configId}/run`, { max_games: maxGames, full_resync: fullResync });
     const note = fullResync ? ' (full re-sync)' : '';
-    toast(`Re-syncing ${cfg?.platform || 'source'}${note}`, 'info');
+    toast(`Re-syncing ${cfg?.platform || 'source'} for ${cfg?.username || ''}${note}`, 'info');
     await refreshAll();
     renderGames();
     pollSync(configId);
@@ -661,12 +646,12 @@ async function doResync(configId) {
   }
 }
 
-async function doDeleteSync(configId) {
-  const cfg = S.syncConfigs.find(item => item.id === configId);
-  if (!confirm(`Remove the sync source for ${cfg?.username} on ${cfg?.platform}?`)) return;
+async function doDeleteSyncGroup(configIds) {
+  const first = S.syncConfigs.find(c => c.id === configIds[0]);
+  if (!confirm(`Remove ${esc(first?.username || 'this account')} on ${first?.platform || 'this platform'}?`)) return;
   try {
-    await DEL(`/sync/${configId}`);
-    toast('Sync source removed', 'success');
+    await Promise.all(configIds.map(id => DEL(`/sync/${id}`)));
+    toast('Account removed', 'success');
     await refreshAll();
     renderGames();
   } catch (err) {

@@ -547,6 +547,11 @@ code {
 /* ── Sync sources ───────────────────────────────────────────── */
 .sync-list { display: flex; flex-direction: column; gap: 8px; }
 
+.accounts-add-row { display: flex; flex-direction: column; gap: 8px; }
+.accounts-platform-row { display: flex; align-items: center; gap: 8px; }
+.accounts-platform-row .field { flex: 1; }
+.accounts-platform-row .sync-icon { flex-shrink: 0; font-size: 1rem; }
+
 .sync-row {
   display: flex;
   align-items: center;
