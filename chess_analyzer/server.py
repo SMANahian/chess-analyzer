@@ -6,7 +6,7 @@ import os
 from enum import Enum
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -35,6 +35,11 @@ class SyncConfigIn(BaseModel):
     color: Color
     platform: Platform
     username: str = Field(min_length=1, max_length=64)
+
+
+class RunSyncIn(BaseModel):
+    max_games: int = Field(default=0, ge=0, le=50000)
+    full_resync: bool = False
 
 
 class PracticeSessionIn(BaseModel):
@@ -285,7 +290,7 @@ async def delete_sync_config(config_id: int) -> JSONResponse:
 
 
 @app.post("/api/sync/{config_id}/run", status_code=202)
-async def run_sync(config_id: int) -> JSONResponse:
+async def run_sync(config_id: int, body: RunSyncIn = Body(default=RunSyncIn())) -> JSONResponse:
     config = db.get_sync_config(config_id)
     if not config:
         raise HTTPException(404, "Sync config not found")
@@ -294,8 +299,9 @@ async def run_sync(config_id: int) -> JSONResponse:
     if run and run["status"] == "running":
         raise HTTPException(409, "Sync already running for this config")
 
-    fetcher.sync_in_background(config_id)
-    db.log_event("api", "Sync queued", details={"config_id": config_id})
+    max_games = body.max_games if body.max_games > 0 else None
+    fetcher.sync_in_background(config_id, max_games=max_games, full_resync=body.full_resync)
+    db.log_event("api", "Sync queued", details={"config_id": config_id, "max_games": max_games, "full_resync": body.full_resync})
     return JSONResponse({"status": "started", "config_id": config_id})
 
 

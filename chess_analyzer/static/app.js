@@ -142,11 +142,12 @@ function renderNavBadges() {
 function renderEngineBadge() {
   const el = document.getElementById('engine-badge');
   if (!el || !S.status) return;
+  const dev = S.status.dev_mode ? ' · dev' : '';
   if (S.status.engine_ok) {
-    el.innerHTML = `<span class="status-pill status-good">♟ Engine ready${S.status.dev_mode ? ' · dev' : ''}</span>`;
+    el.innerHTML = `<span class="badge badge-green">Engine ready${dev}</span>`;
     return;
   }
-  el.innerHTML = `<span class="status-pill status-warn" title="${esc(S.status.engine_path)}">⚠ Engine missing${S.status.dev_mode ? ' · dev' : ''}</span>`;
+  el.innerHTML = `<span class="badge badge-red" title="${esc(S.status.engine_path)}">No engine${dev}</span>`;
 }
 
 function initTheme() {
@@ -161,9 +162,7 @@ function setupThemeToggle() {
 function renderThemeToggle() {
   const el = document.getElementById('theme-toggle');
   if (!el) return;
-  el.innerHTML = S.theme === 'dark'
-    ? '<span aria-hidden="true">☀</span><span>Light</span>'
-    : '<span aria-hidden="true">☾</span><span>Dark</span>';
+  el.textContent = S.theme === 'dark' ? '☀ Light' : '☾ Dark';
 }
 
 function toggleTheme() {
@@ -175,7 +174,7 @@ function applyTheme(theme, persist = true) {
   document.documentElement.dataset.theme = S.theme;
   document.documentElement.style.colorScheme = S.theme;
   document.querySelector('meta[name="theme-color"]')
-    ?.setAttribute('content', S.theme === 'dark' ? '#07131b' : '#f5efe3');
+    ?.setAttribute('content', S.theme === 'dark' ? '#0f172a' : '#f1f5f9');
   if (persist) localStorage.setItem('chess-analyzer-theme', S.theme);
   renderThemeToggle();
 }
@@ -184,122 +183,137 @@ function renderGames() {
   const colors = S.status?.colors || { white: {}, black: {} };
   const summary = S.status?.summary || {};
   const activeJobs = getLiveJobs();
-  const queueCount = summary.analysis_queue || 0;
-  const runningAnalysis = summary.analysis_running || 0;
-  const runningSyncs = summary.sync_running || 0;
+  const noSetup = !S.syncConfigs.length && !(summary.total_games > 0);
 
-  setApp(`
-    <div class="page-shell">
-      <section class="panel hero-panel">
-        <div class="hero-copy">
-          <p class="hero-eyebrow">Chess opening preparation</p>
-          <h1 class="hero-title">Find your leaks. Drill them out.</h1>
-          <p class="hero-text">
-            Upload PGNs or sync directly from Lichess and Chess.com. Stockfish finds the positions
-            you keep getting wrong — then you drill them until they stick.
-          </p>
-          <div class="hero-actions">
-            <a href="#/analysis/white" class="btn btn-primary">♔ Review White</a>
-            <a href="#/analysis/black" class="btn btn-secondary">♚ Review Black</a>
-            <a href="#/practice" class="btn btn-ghost">⚔ Practice</a>
+  if (noSetup) {
+    setApp(`
+      <div class="page" id="games-view">
+        <div class="onboarding">
+          <div class="onboard-hero">
+            <h1>Analyze your opening mistakes</h1>
+            <p>Connect your Lichess or Chess.com account. Stockfish finds recurring mistakes in your openings — then you drill them until they stick.</p>
+          </div>
+
+          <div class="platform-grid">
+            <div class="platform-card">
+              <div class="platform-card-head">
+                <span class="platform-logo">⚡</span>
+                <div>
+                  <h3>Lichess</h3>
+                  <p>Free and open source</p>
+                </div>
+              </div>
+              <div class="connect-row">
+                <span class="connect-label">♔ White</span>
+                <input id="input-lichess-white" type="text" placeholder="Your username" class="field field-sm" />
+                <button id="btn-save-lichess-white" class="btn btn-primary btn-sm">Connect</button>
+              </div>
+              <div class="connect-row">
+                <span class="connect-label">♚ Black</span>
+                <input id="input-lichess-black" type="text" placeholder="Your username" class="field field-sm" />
+                <button id="btn-save-lichess-black" class="btn btn-primary btn-sm">Connect</button>
+              </div>
+            </div>
+
+            <div class="platform-card">
+              <div class="platform-card-head">
+                <span class="platform-logo">♟</span>
+                <div>
+                  <h3>Chess.com</h3>
+                  <p>Most popular chess platform</p>
+                </div>
+              </div>
+              <div class="connect-row">
+                <span class="connect-label">♔ White</span>
+                <input id="input-chesscom-white" type="text" placeholder="Your username" class="field field-sm" />
+                <button id="btn-save-chesscom-white" class="btn btn-primary btn-sm">Connect</button>
+              </div>
+              <div class="connect-row">
+                <span class="connect-label">♚ Black</span>
+                <input id="input-chesscom-black" type="text" placeholder="Your username" class="field field-sm" />
+                <button id="btn-save-chesscom-black" class="btn btn-primary btn-sm">Connect</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="onboard-or">or upload PGN files directly</div>
+          <div class="pgn-row">
+            <button class="btn btn-secondary" id="upload-white-btn">♔ Upload White PGN</button>
+            <input type="file" id="file-white" accept=".pgn" class="hidden" />
+            <button class="btn btn-secondary" id="upload-black-btn">♚ Upload Black PGN</button>
+            <input type="file" id="file-black" accept=".pgn" class="hidden" />
           </div>
         </div>
-        <div class="hero-rail">
-          <div class="hero-note">
-            <span class="hero-note-label">Stockfish engine</span>
-            <strong>${S.status?.engine_ok ? '✓ Ready for analysis' : '⚠ Stockfish missing'}</strong>
-            <span>${S.status?.engine_ok ? esc(S.status.engine_path) : esc(S.status?.engine_hint || 'brew install stockfish')}</span>
-          </div>
-          <div class="hero-note">
-            <span class="hero-note-label">Background jobs</span>
-            <strong>${summary.active_jobs || 0} active</strong>
-            <span>${runningAnalysis} analysis · ${runningSyncs} sync · ${queueCount} queued</span>
-          </div>
-        </div>
-      </section>
-
-      <div class="metric-grid">
-        ${metricCard(summary.total_games || 0, 'Games', 'In your library')}
-        ${metricCard(summary.total_mistakes || 0, 'Active mistakes', 'Need drilling')}
-        ${metricCard(summary.total_mastered || 0, 'Mastered', 'Positions cleared')}
-        ${metricCard(summary.total_snoozed || 0, 'Snoozed', 'Parked for later')}
-        ${metricCard(
-          summary.practice_total ? `${Math.round((summary.practice_correct/summary.practice_total)*100)}%` : '—',
-          'Practice accuracy',
-          summary.practice_best_streak ? `Best streak: ${summary.practice_best_streak}` : 'No sessions yet'
-        )}
       </div>
-
-      ${!S.status?.engine_ok ? `
-        <section class="panel warning-banner">
-          <strong>Stockfish is unavailable.</strong>
-          <span>Install it with <code>${esc(S.status?.engine_hint || 'brew install stockfish')}</code> or set <code>STOCKFISH_PATH</code>.</span>
-        </section>
-      ` : ''}
-
-      <section class="panel ops-shell">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">Background jobs</p>
-            <h2>Live operations</h2>
-            <p class="panel-subtitle">Dashboard auto-refreshes every 10 seconds while jobs run.</p>
+    `);
+  } else {
+    setApp(`
+      <div class="page" id="games-view">
+        <div class="page-header">
+          <h1>Dashboard</h1>
+          <div class="page-header-actions">
+            <a href="#/practice" class="btn btn-primary">⚔ Practice</a>
           </div>
-          <span class="status-pill ${activeJobs.length > 0 ? 'status-info' : ''}">${activeJobs.length} active</span>
         </div>
-        ${activeJobs.length ? `
-          <div class="ops-grid">
-            ${activeJobs.map(job => liveJobCard(job)).join('')}
-          </div>
-        ` : `
-          <div class="empty-block compact">
-            <div class="empty-icon">⏸</div>
-            <h3>No background work running</h3>
-            <p>Start a sync or analysis from one of the color cards above.</p>
-          </div>
-        `}
-      </section>
 
-      <section class="color-grid">
-        ${colorCard('white', colors.white || {})}
-        ${colorCard('black', colors.black || {})}
-      </section>
-
-      <section class="panel sync-panel-shell">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">Sync Overview</p>
-            <h2>Connected game sources</h2>
-          </div>
-          <span class="status-pill">${S.syncConfigs.length} configured</span>
+        <div class="metric-row" style="margin-bottom:20px">
+          ${metricCard(summary.total_games || 0, 'Games', '')}
+          ${metricCard(summary.total_mistakes || 0, 'Mistakes', '')}
+          ${metricCard(summary.total_mastered || 0, 'Mastered', '')}
+          ${metricCard(
+            summary.practice_total ? `${Math.round((summary.practice_correct / summary.practice_total) * 100)}%` : '—',
+            'Accuracy', ''
+          )}
         </div>
+
+        ${!S.status?.engine_ok ? `
+          <div class="warning-banner" style="margin-bottom:16px">
+            <strong>⚠ Stockfish not found.</strong>
+            Install with <code>${esc(S.status?.engine_hint || 'brew install stockfish')}</code>
+          </div>
+        ` : ''}
+
+        <div id="ops-section"${activeJobs.length ? '' : ' style="display:none"'} style="margin-bottom:16px">
+          <div class="card">
+            <div class="card-head">
+              <h2>Running now</h2>
+              <span class="badge badge-blue">${activeJobs.length} active</span>
+            </div>
+            <div id="live-ops-body">
+              <div class="jobs-grid">${activeJobs.map(liveJobCard).join('')}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="color-grid" style="margin-bottom:20px">
+          ${colorCard('white', colors.white || {})}
+          ${colorCard('black', colors.black || {})}
+        </div>
+
         ${S.syncConfigs.length ? `
-          <div class="sync-list">
-            ${S.syncConfigs.map(syncConfigRow).join('')}
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-head">
+              <h2>Sync sources</h2>
+              <span class="badge badge-default">${S.syncConfigs.length} configured</span>
+            </div>
+            <div class="sync-list">${S.syncConfigs.map(syncConfigRow).join('')}</div>
           </div>
-        ` : `
-          <div class="empty-block compact">
-            <div class="empty-icon">⚡</div>
-            <h3>No sync sources yet</h3>
-            <p>Connect a Lichess or Chess.com username from either color card above. Syncs are incremental — only new games are fetched each time.</p>
+        ` : ''}
+
+        <div class="card">
+          <div class="card-head"><h2>Data</h2></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input id="import-file" type="file" accept=".json,application/json" class="hidden" />
+            <button id="btn-import" class="btn btn-secondary">Import backup</button>
+            <button id="btn-export" class="btn btn-ghost">Export backup</button>
+            <button id="btn-clear" class="btn btn-danger">Clear all data</button>
           </div>
-        `}
-      </section>
-
-      <section class="panel action-bar">
-        <div>
-          <p class="eyebrow">Backup and reset</p>
-          <h2>Move your local library safely</h2>
         </div>
-        <div class="action-row">
-          <input id="import-file" type="file" accept=".json,application/json" class="hidden" />
-          <button id="btn-import" class="btn btn-secondary">Import backup</button>
-          <button id="btn-export" class="btn btn-ghost">Export backup</button>
-          <button id="btn-clear" class="btn btn-danger">Clear local data</button>
-        </div>
-      </section>
-    </div>
-  `);
+      </div>
+    `);
+  }
 
+  // Event listeners — work in both onboarding and dashboard mode
   ['white', 'black'].forEach(color => {
     document.querySelectorAll(`[data-tab-group="${color}"]`).forEach(btn =>
       btn.addEventListener('click', () => switchTab(color, btn.dataset.tab))
@@ -308,20 +322,18 @@ function renderGames() {
     const input = document.getElementById(`file-${color}`);
     if (zone && input) {
       zone.addEventListener('click', () => input.click());
-      zone.addEventListener('dragover', evt => {
-        evt.preventDefault();
-        zone.classList.add('drag-over');
-      });
+      zone.addEventListener('dragover', evt => { evt.preventDefault(); zone.classList.add('drag-over'); });
       zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
       zone.addEventListener('drop', evt => {
         evt.preventDefault();
         zone.classList.remove('drag-over');
         if (evt.dataTransfer.files[0]) doUpload(color, evt.dataTransfer.files[0]);
       });
-      input.addEventListener('change', () => {
-        if (input.files[0]) doUpload(color, input.files[0]);
-      });
+      input.addEventListener('change', () => { if (input.files[0]) doUpload(color, input.files[0]); });
+    } else if (input) {
+      input.addEventListener('change', () => { if (input.files[0]) doUpload(color, input.files[0]); });
     }
+    document.getElementById(`upload-${color}-btn`)?.addEventListener('click', () => input?.click());
     document.getElementById(`btn-save-lichess-${color}`)?.addEventListener('click', () => saveSyncConfig(color, 'lichess'));
     document.getElementById(`btn-save-chesscom-${color}`)?.addEventListener('click', () => saveSyncConfig(color, 'chesscom'));
     document.getElementById(`btn-analyze-${color}`)?.addEventListener('click', () => doAnalyze(color));
@@ -336,6 +348,12 @@ function renderGames() {
     });
   });
 
+  document.querySelectorAll('[data-toggle-opts]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const opts = document.getElementById(`sync-opts-${btn.dataset.toggleOpts}`);
+      if (opts) opts.style.display = opts.style.display === 'none' ? 'flex' : 'none';
+    })
+  );
   document.querySelectorAll('[data-resync]').forEach(btn =>
     btn.addEventListener('click', () => doResync(Number(btn.dataset.resync)))
   );
@@ -362,45 +380,42 @@ function colorCard(color, info) {
   const chessComCfg = S.syncConfigs.find(cfg => cfg.color === color && cfg.platform === 'chesscom');
 
   return `
-    <section class="panel color-card ${color}">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">${color === 'white' ? 'Build the initiative' : 'Defend with precision'}</p>
-          <h2>${icon} ${cap} repertoire</h2>
-        </div>
-        <span class="status-pill">${info.game_count || 0} games</span>
-      </div>
-
-      <div class="card-topline">
-        <span>${hasGames ? `${info.game_count} games ready for analysis` : 'Upload or sync games to start'}</span>
-        ${statusBadge(info.run_status, info.run_queue_position)}
-      </div>
-
-      <div class="tab-strip" role="tablist">
-        <button class="tab-btn active" data-tab-group="${color}" data-tab="file">📄 File</button>
-        <button class="tab-btn" data-tab-group="${color}" data-tab="lichess">⚡ Lichess</button>
-        <button class="tab-btn" data-tab-group="${color}" data-tab="chesscom">♟ Chess.com</button>
-      </div>
-
-      <div id="tab-${color}-file" class="tab-pane">
-        <div id="zone-${color}" class="drop-zone">
-          <input type="file" id="file-${color}" accept=".pgn" class="hidden" />
-          <div class="drop-zone-icon">${hasGames ? '🔄' : '📂'}</div>
-          <div class="drop-zone-title">${hasGames ? 'Replace PGN' : 'Drop a PGN file here'}</div>
-          <p>${hasGames ? 'Drop a new file or click to browse' : 'Supports standard PGN files exported from any platform'}</p>
+    <div class="color-card ${color}">
+      <div class="color-card-head">
+        <h2>${icon} ${cap}</h2>
+        <div class="color-card-head-right">
+          <span class="badge badge-default">${info.game_count || 0} games</span>
+          ${statusBadge(info.run_status, info.run_queue_position)}
         </div>
       </div>
 
-      <div id="tab-${color}-lichess" class="tab-pane hidden">
-        ${syncInputPanel(color, 'lichess', lichessCfg)}
-      </div>
+      <div class="color-card-body">
+        <div class="tab-strip" role="tablist">
+          <button class="tab-btn active" data-tab-group="${color}" data-tab="file">📄 File</button>
+          <button class="tab-btn" data-tab-group="${color}" data-tab="lichess">⚡ Lichess</button>
+          <button class="tab-btn" data-tab-group="${color}" data-tab="chesscom">♟ Chess.com</button>
+        </div>
 
-      <div id="tab-${color}-chesscom" class="tab-pane hidden">
-        ${syncInputPanel(color, 'chesscom', chessComCfg)}
-      </div>
+        <div id="tab-${color}-file" class="tab-pane">
+          <div id="zone-${color}" class="drop-zone">
+            <input type="file" id="file-${color}" accept=".pgn" class="hidden" />
+            <div class="drop-zone-icon">${hasGames ? '🔄' : '📂'}</div>
+            <div class="drop-zone-title">${hasGames ? 'Replace PGN' : 'Drop a PGN file here'}</div>
+            <p>${hasGames ? 'Drop a new file or click to browse' : 'Supports PGN files from any platform'}</p>
+          </div>
+        </div>
 
-      ${statusHtml}
-    </section>
+        <div id="tab-${color}-lichess" class="tab-pane hidden">
+          ${syncInputPanel(color, 'lichess', lichessCfg)}
+        </div>
+
+        <div id="tab-${color}-chesscom" class="tab-pane hidden">
+          ${syncInputPanel(color, 'chesscom', chessComCfg)}
+        </div>
+
+        <div id="color-status-${color}">${statusHtml}</div>
+      </div>
+    </div>
   `;
 }
 
@@ -424,36 +439,34 @@ function analysisStatusBlock(color, info) {
 
   if (!hasGames) {
     return `<div class="status-block">
-      <p class="status-copy">Upload or sync games for this color to create a training queue.</p>
+      <p class="status-text">Upload or sync games to create a training queue.</p>
     </div>`;
   }
 
   return `
     <div class="status-block">
       <div class="status-row">
-        <div>
+        <div class="status-main">
           <strong>${runLabel(run)}</strong>
-          <p class="status-copy">${runDescription(run, queuePosition, info.run_error, progress, total, readyCount)}</p>
+          <p>${runDescription(run, queuePosition, info.run_error, progress, total, readyCount)}</p>
         </div>
         <div class="status-actions">
-          <select class="field-select depth-select" id="depth-select-${color}" title="Analysis depth">
-            <option value="6" ${(S.status?.analysis_depth || 6) === 6 ? 'selected' : ''}>Quick (depth 6)</option>
+          <select class="sel field-sm" id="depth-select-${color}" title="Analysis depth">
+            <option value="6"  ${(S.status?.analysis_depth || 6) === 6  ? 'selected' : ''}>Quick (depth 6)</option>
             <option value="10" ${(S.status?.analysis_depth || 6) === 10 ? 'selected' : ''}>Standard (depth 10)</option>
             <option value="16" ${(S.status?.analysis_depth || 6) === 16 ? 'selected' : ''}>Deep (depth 16)</option>
           </select>
-          <button id="btn-analyze-${color}" class="btn btn-primary" ${run === 'running' || run === 'queued' ? 'disabled' : ''}>
+          <button id="btn-analyze-${color}" class="btn btn-primary btn-sm" ${run === 'running' || run === 'queued' ? 'disabled' : ''}>
             ${actionLabel}
           </button>
-          ${canCancel ? `<button id="btn-cancel-${color}" class="btn btn-ghost">Stop after this batch</button>` : ''}
+          ${canCancel ? `<button id="btn-cancel-${color}" class="btn btn-ghost btn-sm">Stop</button>` : ''}
         </div>
       </div>
       ${total > 0 ? `
-        <div class="progress-track">
-          <div class="progress-fill" style="width:${pct}%"></div>
-        </div>
-        <p class="status-copy status-copy-strong">${progress} / ${total} games analyzed · ${readyCount} positions ready now · batches of ${S.status?.analysis_batch_games || 20}</p>
+        <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+        <p class="status-copy-strong">${progress} / ${total} games analyzed · ${readyCount} positions ready</p>
       ` : ''}
-      ${(run === 'done' || resumable || readyCount > 0) ? `<a href="#/analysis/${color}" class="inline-link">Open the ${color} analysis view</a>` : ''}
+      ${(run === 'done' || resumable || readyCount > 0) ? `<a href="#/analysis/${color}" class="inline-link">Open ${color} analysis →</a>` : ''}
     </div>
   `;
 }
@@ -488,11 +501,9 @@ function syncProgressMarkup(run) {
   const requested = details.requested_limit || fetched || 0;
   const pct = requested > 0 ? Math.max(4, Math.min(100, Math.round((fetched / requested) * 100))) : 0;
   return `
-    <div class="sync-progress">
-      <div class="progress-track">
-        <div class="progress-fill" style="width:${pct}%"></div>
-      </div>
-      <p class="status-copy">${fetched} fetched so far · ${details.new_ids || 0} new ids · ${details.total_games_after_merge || 0} games currently in the library</p>
+    <div style="margin-top:8px">
+      <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+      <p class="status-text">${fetched} fetched · ${details.new_ids || 0} new · ${details.total_games_after_merge || 0} total games</p>
     </div>
   `;
 }
@@ -503,26 +514,24 @@ function syncInputPanel(color, platform, cfg) {
   const detailBits = syncDetailBits(cfg);
 
   return `
-    <div class="sync-input-panel">
-      <div class="sync-input-row">
+    <div>
+      <div class="sync-field-row">
         <input
           id="input-${platform}-${color}"
           type="text"
           value="${esc(cfg?.username || '')}"
           placeholder="${placeholder}"
-          class="field-input"
+          class="field field-sm"
         />
-        <button id="btn-save-${platform}-${color}" class="btn btn-secondary" ${run?.status === 'running' ? 'disabled' : ''}>
+        <button id="btn-save-${platform}-${color}" class="btn btn-secondary btn-sm" ${run?.status === 'running' ? 'disabled' : ''}>
           ${cfg ? 'Save & sync' : 'Connect'}
         </button>
       </div>
       <p class="field-help">
-        ${cfg
-          ? detailBits.join(' · ') || 'Connected'
-          : 'This stores games locally and only fetches new games on later syncs.'}
+        ${cfg ? detailBits.join(' · ') || 'Connected' : 'Stores games locally — only fetches new games on later syncs.'}
       </p>
       ${syncProgressMarkup(run)}
-      ${run?.status === 'error' ? `<p class="error-copy">${esc(run.error || 'sync failed')}</p>` : ''}
+      ${run?.status === 'error' ? `<p class="error-text">${esc(run.error || 'sync failed')}</p>` : ''}
     </div>
   `;
 }
@@ -533,26 +542,38 @@ function syncConfigRow(cfg) {
   const colorIcon = cfg.color === 'white' ? '♔' : '♚';
   const running = run?.status === 'running';
   const bits = syncDetailBits(cfg);
+  const hasHistory = !!(cfg.last_synced_at || run);
 
   return `
-    <div class="sync-row">
-      <div class="sync-row-main">
-        <span class="sync-icon">${platformIcon}</span>
-        <div>
-          <strong>${colorIcon} ${esc(cfg.username)}</strong>
-          <p>${cfg.platform} · ${bits.join(' · ') || 'ready to sync'}</p>
+    <div class="sync-row" id="sync-row-${cfg.id}">
+      <span class="sync-icon">${platformIcon}</span>
+      <div class="sync-row-body">
+        <strong>${colorIcon} ${esc(cfg.username)}</strong>
+        <p>${cfg.platform} · ${bits.join(' · ') || 'ready to sync'}</p>
+        ${running ? syncProgressMarkup(run) : ''}
+        <div class="sync-options" id="sync-opts-${cfg.id}" style="display:none">
+          <label class="sync-opt-label">Max games
+            <input type="number" class="field field-sm sync-max-games" id="sync-max-${cfg.id}"
+              placeholder="5000" min="100" max="50000" step="100" value="5000" style="width:90px;margin-left:6px" />
+          </label>
+          ${cfg.platform === 'lichess' && hasHistory ? `
+            <label class="sync-opt-label" style="margin-left:12px">
+              <input type="checkbox" id="sync-full-${cfg.id}" />
+              Full re-sync (fetch all history)
+            </label>
+          ` : ''}
         </div>
       </div>
       <div class="sync-row-side">
-        ${run?.status === 'done' ? `<span class="status-pill status-good">+${run.games_new}</span>` : ''}
-        ${run?.status === 'running' ? `<span class="status-pill status-info">Fetching</span>` : ''}
-        ${run?.status === 'error' ? `<span class="status-pill status-warn" title="${esc(run.error || '')}">Error</span>` : ''}
-        <button class="btn-icon" data-resync="${cfg.id}" title="Run sync" ${running ? 'disabled' : ''}>
+        ${run?.status === 'done'    ? `<span class="badge badge-green">+${run.games_new}</span>` : ''}
+        ${run?.status === 'running' ? `<span class="badge badge-blue">Fetching</span>` : ''}
+        ${run?.status === 'error'   ? `<span class="badge badge-red" title="${esc(run.error || '')}">Error</span>` : ''}
+        <button class="btn-icon" data-toggle-opts="${cfg.id}" title="Sync options" ${running ? 'disabled' : ''}>⚙</button>
+        <button class="btn-icon" data-resync="${cfg.id}" title="Sync now" ${running ? 'disabled' : ''}>
           ${running ? '<span class="spinner"></span>' : '↺'}
         </button>
-        <button class="btn-icon" data-delsync="${cfg.id}" title="Remove source">✕</button>
+        <button class="btn-icon" data-delsync="${cfg.id}" title="Remove">✕</button>
       </div>
-      ${running ? syncProgressMarkup(run) : ''}
     </div>
   `;
 }
@@ -602,8 +623,13 @@ async function saveSyncConfig(color, platform) {
 async function doResync(configId) {
   try {
     const cfg = S.syncConfigs.find(item => item.id === configId);
-    await POST(`/sync/${configId}/run`);
-    toast(`Re-syncing ${cfg?.platform || 'source'}`, 'info');
+    const maxInput = document.getElementById(`sync-max-${configId}`);
+    const fullInput = document.getElementById(`sync-full-${configId}`);
+    const maxGames = maxInput ? (parseInt(maxInput.value, 10) || 0) : 0;
+    const fullResync = fullInput ? fullInput.checked : false;
+    await POST(`/sync/${configId}/run`, { max_games: maxGames, full_resync: fullResync });
+    const note = fullResync ? ' (full re-sync)' : '';
+    toast(`Re-syncing ${cfg?.platform || 'source'}${note}`, 'info');
     await refreshAll();
     renderGames();
     pollSync(configId);
@@ -632,7 +658,7 @@ function pollSync(configId) {
     const refresh = await refreshAll();
     const cfg = S.syncConfigs.find(item => item.id === configId);
     const hash = location.hash.replace(/^#/, '') || '/';
-    if (hash === '/') renderGames();
+    if (hash === '/') patchGamesLive();
     if (cfg && hash === `/analysis/${cfg.color}`) {
       await renderAnalysis(cfg.color, { preserve: true });
     }
@@ -694,7 +720,7 @@ function pollAnalysis(color) {
     const refresh = await refreshAll();
     const runStatus = S.status?.colors?.[color]?.run_status;
     const hash = location.hash.replace(/^#/, '') || '/';
-    if (hash === '/') renderGames();
+    if (hash === '/') patchGamesLive();
     if (hash === `/analysis/${color}`) {
       await renderAnalysis(color, { preserve: true });
     }
@@ -725,8 +751,9 @@ async function renderAnalysis(color, options = {}) {
   const previousKey = preserve ? currentMistakeKey() : null;
   const previousFilters = preserve ? { ...S.filters } : null;
   S.color = color;
-  if (!preserve) {
-    setApp(`<div class="page-shell"><section class="panel loading-panel"><span class="spinner"></span><p>Loading analysis…</p></section></div>`);
+  const alreadyBuilt = preserve && !!document.getElementById('analysis-view');
+  if (!alreadyBuilt) {
+    setApp(`<div class="page"><div class="loading"><span class="spinner"></span>Loading…</div></div>`);
   }
 
   try {
@@ -734,7 +761,7 @@ async function renderAnalysis(color, options = {}) {
     S.stats = data.stats || {};
     S.analysisMeta = data;
     S.allMistakes = data.mistakes || [];
-    S.filters = preserve && previousFilters ? previousFilters : { query: '', opening: 'all', severity: 'all' };
+    S.filters = preserve && previousFilters ? previousFilters : { query: '', opening: 'all', severity: 'all', sort: 'default' };
     if (!preserve) S.idx = 0;
     applyAnalysisFilters(false);
     if (preserve && previousKey) {
@@ -742,7 +769,9 @@ async function renderAnalysis(color, options = {}) {
       S.idx = nextIdx >= 0 ? nextIdx : Math.max(0, Math.min(S.idx, S.mistakes.length - 1));
     }
   } catch (err) {
-    setApp(`<div class="page-shell"><section class="panel empty-block"><h2>Could not load analysis</h2><p>${esc(err.message)}</p></section></div>`);
+    if (!alreadyBuilt) {
+      setApp(`<div class="page"><div class="card"><div class="empty"><h2>Could not load analysis</h2><p>${esc(err.message)}</p></div></div></div>`);
+    }
     return;
   }
 
@@ -753,8 +782,12 @@ async function renderAnalysis(color, options = {}) {
   }
 
   syncLivePolls();
-  buildAnalysisUI();
-  attachKeys();
+  if (alreadyBuilt) {
+    patchAnalysisLive(color);
+  } else {
+    buildAnalysisUI();
+    attachKeys();
+  }
 }
 
 function buildAnalysisUI() {
@@ -772,123 +805,97 @@ function buildAnalysisUI() {
   const autoUpdating = ['queued', 'running'].includes(run.run_status || '') || runningSyncs.length > 0;
 
   setApp(`
-    <div class="page-shell analysis-view" id="analysis-view">
-      <section class="panel analysis-hero">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">Focused review</p>
-            <h1>${icon} ${colorTitle}</h1>
+    <div class="page" id="analysis-view">
+      <div class="analysis-header">
+        <h1>${icon} ${colorTitle}</h1>
+        <div class="analysis-header-actions">
+          ${autoUpdating ? '<span class="badge badge-blue">Live</span>' : ''}
+          <a href="#/practice" class="btn btn-primary">Practice</a>
+          <button id="btn-export" class="btn btn-ghost btn-sm">Export</button>
+        </div>
+      </div>
+
+      <div class="analysis-metrics" style="margin-bottom:14px">
+        ${metricCard(S.stats.total || 0, 'Mistakes', '')}
+        ${metricCard(S.analysisMeta.mastered_count || 0, 'Mastered', '')}
+        ${metricCard(S.analysisMeta.snoozed_count || 0, 'Snoozed', '')}
+      </div>
+
+      ${queueBannerVisible ? `
+        <div class="queue-banner" style="margin-bottom:14px">
+          <div class="queue-banner-body">
+            <strong>${run.run_status === 'queued' ? `Queued #${run.run_queue_position || 1}` : run.run_status === 'running' ? 'Analysis in progress' : 'Partial queue ready'}</strong>
+            <p>${run.run_status === 'running' ? `${progress} / ${total} games analyzed · ${readyCount} positions ready.` : run.run_status === 'queued' ? `Waiting for the worker · ${progress} / ${total} already analyzed.` : `${progress} / ${total} analyzed · practice current results or continue later.`}</p>
+            ${total ? `<div class="progress-bar" style="margin-top:8px"><div class="progress-fill" style="width:${pct}%"></div></div>` : ''}
           </div>
-          <div class="hero-actions">
-            ${autoUpdating ? '<span class="status-pill status-info">Updates automatically</span>' : ''}
-            <a href="#/practice" class="btn btn-primary">Practice this queue</a>
-            <button id="btn-export" class="btn btn-ghost">Export backup</button>
+          <div class="queue-banner-actions">
+            <span class="badge badge-default">${readyCount} ready</span>
+            ${run.run_status === 'queued' || run.run_status === 'running'
+              ? '<button id="btn-cancel-analysis" class="btn btn-ghost btn-sm">Stop after this batch</button>'
+              : '<button id="btn-resume-analysis" class="btn btn-secondary btn-sm">Continue analysis</button>'}
           </div>
         </div>
+      ` : ''}
 
-        <div class="metric-grid compact">
-          ${metricCard(S.stats.total || 0, 'Active mistakes', 'After filters')}
-          ${metricCard(S.stats.avg_cp || 0, 'Average loss', 'Centipawns')}
-          ${metricCard(S.stats.max_cp || 0, 'Worst miss', 'Centipawns')}
-          ${metricCard(S.analysisMeta.snoozed_count || 0, 'Snoozed', 'Parked for later')}
-          ${metricCard(S.analysisMeta.mastered_count || 0, 'Mastered', 'Already cleared')}
+      ${runningSyncs.length ? `
+        <div class="live-rail" style="margin-bottom:14px">
+          ${runningSyncs.map(cfg => syncLiveCard(cfg)).join('')}
+        </div>
+      ` : ''}
+
+      <div class="analysis-grid">
+        <div class="list-panel">
+          <div class="list-panel-head">
+            <h2>Queue</h2>
+            <span class="badge badge-default" id="queue-count">${S.mistakes.length} shown</span>
+          </div>
+          <div class="filter-bar">
+            <input id="filter-query" class="field field-sm" type="text" placeholder="Search move, opening…" />
+            <div class="filter-row">
+              <select id="filter-opening" class="sel field-sm"></select>
+              <select id="filter-severity" class="sel field-sm">
+                <option value="all">All</option>
+                <option value="inaccuracy">Inaccuracy 100+</option>
+                <option value="mistake">Mistake 150+</option>
+                <option value="blunder">Blunder 300+</option>
+              </select>
+            </div>
+            <select id="filter-sort" class="sel field-sm">
+              <option value="default">Most frequent</option>
+              <option value="cp">Worst cp loss</option>
+              <option value="hardest">Hardest (practice)</option>
+              <option value="due">SM-2 due first</option>
+            </select>
+          </div>
+          <div class="mistake-list" id="mlist"></div>
         </div>
 
-        ${queueBannerVisible ? `
-          <div class="queue-banner">
-            <div>
-              <strong>${run.run_status === 'queued'
-                ? `Queued #${run.run_queue_position || 1}`
-                : run.run_status === 'running'
-                  ? 'Analysis in progress'
-                  : 'Partial queue ready'}</strong>
-              <p>${run.run_status === 'queued'
-                ? `Waiting for the worker. ${progress} / ${total} games already analyzed.`
-                : run.run_status === 'running'
-                  ? `${progress} / ${total} games analyzed so far. ${readyCount} positions are already ready to practice.`
-                  : `${progress} / ${total} games analyzed. You can practice the ready positions now or continue the remaining games later.`}</p>
-            </div>
-            <div class="queue-banner-actions">
-              ${total ? `
-                <div class="progress-track wide">
-                  <div class="progress-fill" style="width:${pct}%"></div>
-                </div>
-              ` : ''}
-              <span class="status-pill">${readyCount} ready</span>
-              ${run.run_status === 'queued' || run.run_status === 'running'
-                ? '<button id="btn-cancel-analysis" class="btn btn-ghost">Stop after this batch</button>'
-                : '<button id="btn-resume-analysis" class="btn btn-secondary">Continue analysis</button>'}
-            </div>
-          </div>
-        ` : ''}
-
-        ${runningSyncs.length ? `
-          <div class="live-rail">
-            ${runningSyncs.map(cfg => syncLiveCard(cfg)).join('')}
-          </div>
-        ` : ''}
-      </section>
-
-      <section class="analysis-grid">
-        <div class="analysis-main">
-          <section class="panel board-panel">
-            <div class="panel-head compact">
+        <div>
+          <div class="board-card">
+            <div class="board-card-head">
               <div>
-                <p class="eyebrow">Position</p>
+                <p style="font-size:.71rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin-bottom:2px">Position</p>
                 <h2 id="ctr" style="font-variant-numeric:tabular-nums">0 / 0</h2>
               </div>
-              <div class="board-actions">
+              <div class="board-nav">
                 <button class="btn-icon" id="nav-first" title="First">⏮</button>
-                <button class="btn-icon" id="nav-prev"  title="Previous (←)">◀</button>
+                <button class="btn-icon" id="nav-prev"  title="Prev (←)">◀</button>
                 <button class="btn-icon" id="nav-next"  title="Next (→)">▶</button>
                 <button class="btn-icon" id="nav-last"  title="Last">⏭</button>
               </div>
             </div>
-            <div class="board-container">
-              <div class="board-wrap" id="board-wrap"></div>
-              <div class="board-toolbar">
-                <button class="btn btn-secondary" id="btn-hint">Hint (H)</button>
-                <button class="btn btn-ghost" id="btn-flip">Flip (F)</button>
-                <button class="btn btn-ghost" id="btn-copy-fen">Copy FEN</button>
-                <button class="btn btn-ghost" id="btn-lichess">Lichess ↗</button>
-                <button class="btn-icon" id="btn-help" title="Keyboard shortcuts (?)">?</button>
-              </div>
+            <div id="board-wrap" class="board-wrap"></div>
+            <div class="board-toolbar">
+              <button class="btn btn-secondary btn-sm" id="btn-hint">Hint</button>
+              <button class="btn btn-ghost btn-sm" id="btn-flip">Flip</button>
+              <button class="btn btn-ghost btn-sm" id="btn-copy-fen">Copy FEN</button>
+              <button class="btn btn-ghost btn-sm" id="btn-lichess">Lichess ↗</button>
+              <button class="btn-icon" id="btn-help" title="Shortcuts (?)">?</button>
             </div>
-          </section>
-
-          <section class="panel detail-panel" id="detail"></section>
+          </div>
+          <div class="detail-card" id="detail"></div>
         </div>
-
-        <section class="panel list-panel">
-          <div class="panel-head compact">
-            <div>
-              <p class="eyebrow">Filters</p>
-              <h2>Training queue</h2>
-              ${autoUpdating ? '<p class="panel-subtitle">New results appear here while background work is still running.</p>' : ''}
-            </div>
-            <span class="status-pill" id="queue-count">${S.mistakes.length} shown</span>
-          </div>
-
-          <div class="filter-bar">
-            <input id="filter-query" class="field-input" type="text" placeholder="Search move, opening, or FEN" />
-            <select id="filter-opening" class="field-select"></select>
-            <select id="filter-severity" class="field-select">
-              <option value="all">All severities</option>
-              <option value="inaccuracy">Inaccuracy 100+</option>
-              <option value="mistake">Mistake 150+</option>
-              <option value="blunder">Blunder 300+</option>
-            </select>
-            <select id="filter-sort" class="field-select">
-              <option value="default">Sort: Most frequent</option>
-              <option value="cp">Sort: Worst cp loss</option>
-              <option value="hardest">Sort: Hardest (practice)</option>
-              <option value="due">Sort: SM-2 due first</option>
-            </select>
-          </div>
-
-          <div class="mistake-list" id="mlist"></div>
-        </section>
-      </section>
+      </div>
     </div>
   `);
 
@@ -941,6 +948,44 @@ function buildAnalysisUI() {
   if (S.mistakes.length) loadMistake(Math.min(S.idx, S.mistakes.length - 1));
 }
 
+/** Patch only the live elements of the analysis view (no DOM wipe, no blink). */
+function patchAnalysisLive(color) {
+  const countEl = document.getElementById('queue-count');
+  if (countEl) countEl.textContent = `${S.mistakes.length} shown`;
+  renderList();
+  if (S.mistakes.length) loadMistake(S.idx);
+  const run = S.status?.colors?.[color] || {};
+  const progress = S.analysisMeta.run_progress || run.run_progress || 0;
+  const total = S.analysisMeta.run_progress_total || run.run_progress_total || 0;
+  const pct = total > 0 ? Math.round((progress / total) * 100) : 0;
+  const bannerFill = document.querySelector('#analysis-view .queue-banner .progress-fill');
+  if (bannerFill) bannerFill.style.width = pct + '%';
+}
+
+/** Patch only the live sections of the games/dashboard view (no DOM wipe, no blink). */
+function patchGamesLive() {
+  if (!document.getElementById('games-view')) { renderGames(); return; }
+  const activeJobs = getLiveJobs();
+  const opsSection = document.getElementById('ops-section');
+  if (opsSection) opsSection.style.display = activeJobs.length ? '' : 'none';
+  const opsBody = document.getElementById('live-ops-body');
+  if (opsBody) {
+    opsBody.innerHTML = activeJobs.length
+      ? `<div class="jobs-grid">${activeJobs.map(liveJobCard).join('')}</div>`
+      : '';
+  }
+  for (const color of ['white', 'black']) {
+    const info = S.status?.colors?.[color] || {};
+    const progress = info.run_progress || 0;
+    const total = info.run_progress_total || 0;
+    const pct = total > 0 ? Math.round((progress / total) * 100) : 0;
+    const fill = document.querySelector(`#color-status-${color} .progress-fill`);
+    if (fill) fill.style.width = pct + '%';
+    const strong = document.querySelector(`#color-status-${color} .status-copy-strong`);
+    if (strong) strong.textContent = `${progress} / ${total} games analyzed · ${info.partial_mistakes_ready || 0} positions ready`;
+  }
+}
+
 function applyAnalysisFilters(shouldRender = true) {
   const query = S.filters.query.trim().toLowerCase();
   S.mistakes = S.allMistakes.filter(item => {
@@ -964,7 +1009,6 @@ function applyAnalysisFilters(shouldRender = true) {
   });
 
   // Apply sort
-  const today = new Date().toISOString().split('T')[0];
   if (S.filters.sort === 'cp') {
     S.mistakes.sort((a, b) => b.avg_cp_loss - a.avg_cp_loss);
   } else if (S.filters.sort === 'hardest') {
@@ -1017,12 +1061,7 @@ function renderList() {
   count.textContent = `${S.mistakes.length} shown`;
 
   if (!S.mistakes.length) {
-    list.innerHTML = `
-      <div class="empty-block compact">
-        <h3>No mistakes match the current filters</h3>
-        <p>Clear the search or choose a wider opening/severity scope.</p>
-      </div>
-    `;
+    list.innerHTML = `<div class="empty" style="padding:24px"><h2>No matches</h2><p>Try wider filters.</p></div>`;
     return;
   }
 
@@ -1030,20 +1069,16 @@ function renderList() {
     const severity = severityData(mistake.avg_cp_loss);
     const san = uciToSan(mistake.fen, mistake.user_move);
     const pracRate = mistake.practice_rate != null
-      ? `<span class="pill pill-prac ${mistake.practice_rate >= 0.8 ? 'prac-good' : mistake.practice_rate >= 0.5 ? 'prac-mid' : 'prac-bad'}" title="${mistake.practice_correct}/${mistake.practice_total} correct">${Math.round(mistake.practice_rate * 100)}%</span>`
+      ? `<span class="pill pill-prac-${mistake.practice_rate >= 0.8 ? 'good' : mistake.practice_rate >= 0.5 ? 'mid' : 'bad'}">${Math.round(mistake.practice_rate * 100)}%</span>`
       : '';
     return `
-      <button class="mistake-row ${severity.rowClass} ${index === S.idx ? 'active' : ''}" data-i="${index}">
+      <button class="mistake-row ${index === S.idx ? 'active' : ''}" data-i="${index}">
         <span class="mistake-rank">${index + 1}</span>
         <div class="mistake-copy">
-          <div class="mistake-title-row">
-            <strong class="mistake-move">${esc(san)}</strong>
-            <span class="pill ${severity.pill}">${severity.label}</span>
-            ${pracRate}
-          </div>
-          <p>${esc(mistake.opening_name || 'Unknown opening')}${mistake.opening_eco ? ` · ${esc(mistake.opening_eco)}` : ''}</p>
+          <span class="mistake-move">${esc(san)} <span class="pill ${severity.pill}">${severity.label}</span> ${pracRate}</span>
+          <span class="mistake-opening">${esc(mistake.opening_name || 'Unknown opening')}${mistake.opening_eco ? ` · ${esc(mistake.opening_eco)}` : ''}</span>
         </div>
-        <div class="mistake-metrics">
+        <div class="mistake-meta">
           <span class="pill pill-cp">−${mistake.avg_cp_loss}cp</span>
           <span class="pill pill-freq">${mistake.pair_count}×</span>
         </div>
@@ -1111,65 +1146,37 @@ function renderDetail(mistake) {
 
   detail.innerHTML = `
     <div class="detail-stack">
-      <div class="detail-header">
+      <div class="detail-head">
         <div>
-          <p class="eyebrow">Position brief</p>
-          <h2 class="detail-move-san">${esc(san)}</h2>
-          <p style="color:var(--ink-2);font-size:.88rem;margin-top:4px">Played ${mistake.pair_count} time${mistake.pair_count !== 1 ? 's' : ''} · always suboptimal</p>
+          <div class="detail-move">${esc(san)}</div>
+          <div class="detail-sub">Played ${mistake.pair_count}× · always suboptimal</div>
         </div>
-        <span class="status-pill ${severity.pill}">${severity.label}</span>
+        <span class="pill ${severity.pill}">${severity.label}</span>
       </div>
 
       ${mistake.opening_name ? `
-        <div class="opening-label">
-          ${mistake.opening_eco ? `<span class="opening-eco-chip">${esc(mistake.opening_eco)}</span>` : ''}
-          <span>${esc(mistake.opening_name)}</span>
+        <div class="opening-tag">
+          ${mistake.opening_eco ? `<span class="eco">${esc(mistake.opening_eco)}</span>` : ''}
+          ${esc(mistake.opening_name)}
         </div>
       ` : ''}
 
-      ${breadcrumb ? `
-        <div class="breadcrumb-moves" title="Opening moves leading to this position">
-          <span class="breadcrumb-label">Path</span>
-          <span class="breadcrumb-sequence">${esc(breadcrumb)}</span>
-        </div>
-      ` : ''}
+      ${breadcrumb ? `<div class="moves-path">${esc(breadcrumb)}</div>` : ''}
 
-      <div class="detail-metric-grid">
-        <div class="detail-metric">
-          <span>Your move</span>
-          <strong class="move-san">${esc(san)}</strong>
-        </div>
-        <div class="detail-metric">
-          <span>Cp loss</span>
-          <strong style="color:var(--red)">−${mistake.avg_cp_loss}</strong>
-        </div>
-        <div class="detail-metric">
-          <span>Seen</span>
-          <strong>${mistake.pair_count}×</strong>
-        </div>
-        <div class="detail-metric">
-          <span>Practice</span>
-          <strong>${pracTotal > 0 ? `${Math.round(pracCorrect / pracTotal * 100)}% (${pracCorrect}/${pracTotal})` : '—'}</strong>
-        </div>
-        <div class="detail-metric">
-          <span>SM-2</span>
-          <strong class="${sm2Due && sm2Due <= today ? 'text-amber' : ''}">${dueLabel}</strong>
-        </div>
+      <div class="detail-metrics">
+        <div class="dm"><span>Cp loss</span><strong style="color:var(--red)">−${mistake.avg_cp_loss}</strong></div>
+        <div class="dm"><span>Seen</span><strong>${mistake.pair_count}×</strong></div>
+        <div class="dm"><span>Practice</span><strong>${pracTotal > 0 ? `${Math.round(pracCorrect / pracTotal * 100)}%` : '—'}</strong></div>
+        <div class="dm"><span>SM-2</span><strong class="${sm2Due && sm2Due <= today ? 'text-amber' : ''}">${dueLabel}</strong></div>
       </div>
 
-      <div class="detail-section">
-        <h3>Better moves</h3>
+      <div>
+        <p class="section-head">Better moves</p>
         ${topSans.length ? `
-          <div class="move-chip-row" id="top-moves">
-            ${topSans.map(({ uci, san: ms }, i) => `<button class="move-chip ${i === 0 ? 'best' : ''}" data-mv="${uci}" data-san="${esc(ms)}">${i === 0 ? '★ ' : ''}${esc(ms)}</button>`).join('')}
+          <div class="move-chips" id="top-moves">
+            ${topSans.map(({ uci, san: ms }, i) => `<button class="move-chip ${i === 0 ? 'best' : ''}" data-mv="${uci}">${i === 0 ? '★ ' : ''}${esc(ms)}</button>`).join('')}
           </div>
-          <p style="font-size:.8rem;color:var(--ink-2);margin-top:8px">Click a move to see it on the board</p>
         ` : '<p class="detail-copy">No alternative moves were returned for this position.</p>'}
-      </div>
-
-      <div class="detail-section">
-        <h3>FEN</h3>
-        <p class="fen-block" id="fen-block">${esc(mistake.fen)}</p>
       </div>
 
       <div class="detail-actions">
@@ -1201,13 +1208,9 @@ function renderDetail(mistake) {
 function renderDetailEmpty() {
   const detail = document.getElementById('detail');
   if (!detail) return;
-  detail.innerHTML = `
-    <div class="empty-block compact">
-      <h3>No mistakes match the current filters</h3>
-      <p>Try a different opening or severity filter, or clear the search.</p>
-    </div>
-  `;
-  document.getElementById('ctr').textContent = '0 / 0';
+  detail.innerHTML = `<div class="empty" style="padding:20px"><h2>No matches</h2><p>Adjust the filters above.</p></div>`;
+  const ctr = document.getElementById('ctr');
+  if (ctr) ctr.textContent = '0 / 0';
 }
 
 function renderEmpty(color, data = {}) {
@@ -1223,58 +1226,57 @@ function renderEmpty(color, data = {}) {
   if (runStatus === 'queued' || runStatus === 'running') {
     body = `
       <h2>${runStatus === 'queued' ? `Queued #${run.run_queue_position || 1}` : 'Analysis in progress'}</h2>
-      <p>${runStatus === 'queued' ? 'Your analysis is waiting for the worker.' : 'Stockfish is reviewing the game batches now.'}</p>
-      ${total ? `<div class="progress-track wide"><div class="progress-fill" style="width:${pct}%"></div></div>` : ''}
-      ${total ? `<p class="muted-copy">${progress} / ${total} games analyzed · ${readyCount} positions ready now</p>` : ''}
-      <div class="hero-actions">
-        <button id="btn-cancel-empty" class="btn btn-ghost">Stop after this batch</button>
+      <p>${runStatus === 'queued' ? 'Waiting for the worker.' : 'Stockfish is analyzing your games.'}</p>
+      ${total ? `<div class="progress-bar" style="max-width:320px;margin:12px auto"><div class="progress-fill" style="width:${pct}%"></div></div>` : ''}
+      ${total ? `<p style="font-size:.8rem;color:var(--text2)">${progress} / ${total} games · ${readyCount} positions ready</p>` : ''}
+      <div class="empty-actions">
+        <button id="btn-cancel-empty" class="btn btn-ghost">Stop</button>
         ${readyCount ? `<a href="#/practice" class="btn btn-secondary">Practice current results</a>` : ''}
       </div>
     `;
   } else if (canResume) {
     body = `
-      <h2>Partial analysis ready for ${color}</h2>
-      <p>${progress} / ${total} games have been analyzed already. You can practice the current queue now or continue the remaining games later.</p>
-      ${total ? `<div class="progress-track wide"><div class="progress-fill" style="width:${pct}%"></div></div>` : ''}
-      <p class="muted-copy">${readyCount} positions currently ready</p>
-      <div class="hero-actions">
+      <h2>Partial analysis ready</h2>
+      <p>${progress} / ${total} games analyzed. Practice the current queue or continue later.</p>
+      ${total ? `<div class="progress-bar" style="max-width:320px;margin:12px auto"><div class="progress-fill" style="width:${pct}%"></div></div>` : ''}
+      <div class="empty-actions">
         <button id="btn-retry-empty" class="btn btn-primary">Continue analysis</button>
-        <a href="#/practice" class="btn btn-secondary">Practice current results</a>
+        <a href="#/practice" class="btn btn-secondary">Practice now</a>
       </div>
     `;
   } else if (runStatus === 'error') {
     body = `
-      <h2>Analysis stopped with an error</h2>
-      <p>${esc(data.run_error || run.run_error || 'Unknown analysis error')}</p>
-      <div class="hero-actions">
-        <button id="btn-retry-empty" class="btn btn-primary">${progress > 0 && total > progress ? 'Continue analysis' : 'Retry analysis'}</button>
-        <a href="#/" class="btn btn-secondary">Back to library</a>
+      <h2>Analysis failed</h2>
+      <p>${esc(data.run_error || run.run_error || 'Unknown error')}</p>
+      <div class="empty-actions">
+        <button id="btn-retry-empty" class="btn btn-primary">${progress > 0 && total > progress ? 'Continue' : 'Retry'}</button>
+        <a href="#/" class="btn btn-secondary">Dashboard</a>
       </div>
     `;
   } else if ((S.status?.colors?.[color]?.game_count || 0) > 0) {
     body = `
       <h2>No active mistakes for ${color}</h2>
-      <p>You either have a clean opening queue right now or every remaining mistake is already mastered or snoozed.</p>
-      <div class="hero-actions">
+      <p>Everything is mastered or snoozed.</p>
+      <div class="empty-actions">
         <button id="btn-retry-empty" class="btn btn-primary">Re-analyze</button>
-        <a href="#/snoozed" class="btn btn-secondary">Review snoozed mistakes</a>
+        <a href="#/snoozed" class="btn btn-secondary">Snoozed</a>
       </div>
     `;
   } else {
     body = `
-      <h2>No games uploaded for ${color}</h2>
-      <p>Upload a PGN or connect a sync source first, then run analysis for this color.</p>
-      <div class="hero-actions">
-        <a href="#/" class="btn btn-primary">Go to library</a>
+      <h2>No games for ${color}</h2>
+      <p>Connect Lichess or Chess.com, or upload a PGN file first.</p>
+      <div class="empty-actions">
+        <a href="#/" class="btn btn-primary">Go to dashboard</a>
       </div>
     `;
   }
 
   setApp(`
-    <div class="page-shell">
-      <section class="panel empty-block roomy">
-        ${body}
-      </section>
+    <div class="page">
+      <div class="card">
+        <div class="empty">${body}</div>
+      </div>
     </div>
   `);
 
@@ -1366,25 +1368,6 @@ function openLichess() {
   }
 }
 
-async function doMaster(mistake) {
-  try {
-    await PUT(`/mistakes/${mistake.id}/master`);
-    await refreshAll();
-    removeAnalysisMistake(mistake.id);
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-}
-
-async function doSnooze(mistake) {
-  try {
-    await PUT(`/mistakes/${mistake.id}/snooze`);
-    await refreshAll();
-    removeAnalysisMistake(mistake.id);
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-}
 
 function doMasterWithUndo(mistake) {
   PUT(`/mistakes/${mistake.id}/master`).then(async () => {
@@ -1482,7 +1465,7 @@ async function doImport(file) {
 }
 
 async function renderPractice() {
-  setApp(`<div class="page-shell"><section class="panel loading-panel"><span class="spinner"></span><p>Preparing practice session…</p></section></div>`);
+  setApp(`<div class="page"><div class="loading"><span class="spinner"></span>Loading…</div></div>`);
   let allMistakes = [];
   let white = null;
   let black = null;
@@ -1494,21 +1477,23 @@ async function renderPractice() {
       ...(black.mistakes || []).map(item => ({ ...item, color: 'black' })),
     ];
   } catch (err) {
-    setApp(`<div class="page-shell"><section class="panel empty-block"><h2>Practice could not load</h2><p>${esc(err.message)}</p></section></div>`);
+    setApp(`<div class="page"><div class="card"><div class="empty"><h2>Practice could not load</h2><p>${esc(err.message)}</p></div></div></div>`);
     return;
   }
 
   if (!allMistakes.length) {
     setApp(`
-      <div class="page-shell">
-        <section class="panel empty-block roomy">
-          <h2>No active mistakes to practice</h2>
-          <p>Run analysis first, or unsnooze mistakes you want back in the queue.</p>
-          <div class="hero-actions">
-            <a href="#/" class="btn btn-primary">Go to library</a>
-            <a href="#/snoozed" class="btn btn-secondary">Review snoozed</a>
+      <div class="page">
+        <div class="card">
+          <div class="empty">
+            <h2>No mistakes to practice</h2>
+            <p>Run analysis first, or unsnooze mistakes you want back in the queue.</p>
+            <div class="empty-actions">
+              <a href="#/" class="btn btn-primary">Dashboard</a>
+              <a href="#/snoozed" class="btn btn-secondary">Snoozed</a>
+            </div>
           </div>
-        </section>
+        </div>
       </div>
     `);
     return;
@@ -1536,61 +1521,52 @@ async function renderPractice() {
 }
 
 function buildPracticeUI({ runningNote = '' } = {}) {
-  // Build opening filter options from all mistakes
   const openingOptions = buildPracticeOpeningOptions();
   setApp(`
-    <div class="page-shell">
-      <section class="panel practice-shell">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">Deliberate practice</p>
-            <h1>Drill your opening mistakes</h1>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <select id="p-opening-filter" class="field-select" style="min-width:160px">${openingOptions}</select>
-            <span class="status-pill" id="p-streak-badge">Streak: 0</span>
-            <button id="p-end" class="btn btn-danger">End session</button>
+    <div class="page">
+      <div class="practice-top">
+        <h1>Practice</h1>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="p-opening-filter" class="sel" style="min-width:160px">${openingOptions}</select>
+          <span class="badge badge-default" id="p-streak-badge">Streak: 0</span>
+          <button id="p-end" class="btn btn-danger btn-sm">End session</button>
+        </div>
+      </div>
+
+      <div class="practice-stats">
+        ${metricCard(0, 'Streak', '')}
+        ${metricCard(0, 'Correct', '')}
+        ${metricCard(0, 'Attempted', '')}
+        ${metricCard(0, 'Best streak', '')}
+      </div>
+
+      ${runningNote ? `<p class="practice-note">${runningNote}</p>` : ''}
+
+      <div class="practice-layout">
+        <div class="prac-board">
+          <div id="p-board-wrap" class="board-wrap-sm"></div>
+          <div class="prac-toolbar">
+            <button id="p-hint" class="btn btn-secondary btn-sm">Hint</button>
+            <button id="p-skip" class="btn btn-ghost btn-sm">Skip</button>
           </div>
         </div>
 
-        <div class="metric-grid compact" style="margin-bottom:0">
-          ${metricCard(0, 'Streak', 'Current run')}
-          ${metricCard(0, 'Correct', 'This session')}
-          ${metricCard(0, 'Attempted', 'Total tries')}
-          ${metricCard(0, 'Best streak', 'Session record')}
-        </div>
+        <div class="prac-sidebar">
+          <h2 id="p-msg" class="prac-msg">Find the best move</h2>
+          <p id="p-ctr" class="prac-ctr"></p>
+          <div id="p-opening" class="prac-opening"></div>
+          <div id="p-breadcrumb" class="prac-breadcrumb"></div>
 
-        ${runningNote ? `<p class="practice-note">${runningNote}</p>` : ''}
-
-        <div class="practice-layout">
-          <div class="practice-board-card">
-            <div class="board-container">
-              <div id="p-board-wrap" class="board-wrap-sm"></div>
-              <div class="board-toolbar" style="max-width:440px">
-                <button id="p-hint" class="btn btn-secondary">Hint</button>
-                <button id="p-skip" class="btn btn-ghost">Skip</button>
-              </div>
-            </div>
-          </div>
-          <div class="practice-copy-card">
-            <div class="prac-info">
-              <p class="eyebrow" style="margin:0">Position</p>
-              <h2 id="p-msg" style="font-size:1.2rem;margin:0">Find the best move</h2>
-              <p class="muted-copy" id="p-ctr" style="font-size:.85rem"></p>
-              <div id="p-opening" class="prac-opening"></div>
-              <div id="p-breadcrumb" class="prac-breadcrumb"></div>
-            </div>
-            <div id="p-after" style="display:none;padding:16px;border-radius:var(--radius-sm);background:var(--s2);border:1px solid var(--line)">
-              <p class="eyebrow" style="margin:0 0 8px">Better moves</p>
-              <div id="p-moves" class="move-chip-row"></div>
-              <div id="p-continuation" style="display:none;margin-top:12px">
-                <p class="eyebrow" style="margin:0 0 6px;font-size:.7rem">Engine continues</p>
-                <div id="p-cont-moves" class="move-chip-row"></div>
-              </div>
+          <div id="p-after" class="after-box" style="display:none">
+            <p class="section-head">Better moves</p>
+            <div id="p-moves" class="move-chips"></div>
+            <div id="p-continuation" style="display:none;margin-top:10px">
+              <p class="section-head">Engine continues</p>
+              <div id="p-cont-moves" class="move-chips"></div>
             </div>
           </div>
         </div>
-      </section>
+      </div>
     </div>
   `);
 
@@ -1700,7 +1676,7 @@ function loadPracticePosition({ resetAttempts = true, resetMessage = true } = {}
   if (openingEl) {
     const colorBadge = `<span class="prac-color-badge">${mistake.color === 'white' ? '♔' : '♚'}</span>`;
     if (mistake.opening_name) {
-      openingEl.innerHTML = `${colorBadge} ${esc(mistake.opening_name)}${mistake.opening_eco ? ` <span class="opening-eco-chip">${esc(mistake.opening_eco)}</span>` : ''}`;
+      openingEl.innerHTML = `${colorBadge} ${esc(mistake.opening_name)}${mistake.opening_eco ? ` <span class="eco">${esc(mistake.opening_eco)}</span>` : ''}`;
     } else {
       openingEl.innerHTML = colorBadge;
     }
@@ -1836,37 +1812,36 @@ async function pracEnd() {
   }
 
   const pct = P.total > 0 ? Math.round((P.correct / P.total) * 100) : 0;
-  const headline = pct >= 85 ? 'Excellent run ♟' : pct >= 65 ? 'Solid session' : pct >= 40 ? 'Keep the reps coming' : 'Every rep counts';
+  const headline = pct >= 85 ? 'Excellent run' : pct >= 65 ? 'Solid session' : pct >= 40 ? 'Keep the reps coming' : 'Every rep counts';
   setApp(`
-    <div class="page-shell">
-      <section class="panel empty-block roomy">
-        <p class="eyebrow">Session complete</p>
-        <h1>${headline}</h1>
-        <p style="color:var(--ink-2)">${P.total > 0 ? `${P.correct} of ${P.total} positions solved — ${pct}% accuracy` : 'No positions attempted.'}</p>
+    <div class="page">
+      <div class="card" style="max-width:600px;margin:40px auto;text-align:center">
+        <h1 style="margin-bottom:6px">${headline}</h1>
+        <p style="color:var(--text2);margin-bottom:20px">${P.total > 0 ? `${P.correct} of ${P.total} positions solved` : 'No positions attempted.'}</p>
         <div class="result-grid">
           <div class="result-card">
-            <span class="r-val" style="color:var(--green)">${pct}%</span>
-            <span class="r-lbl">Accuracy</span>
+            <span class="result-val" style="color:var(--green)">${pct}%</span>
+            <span class="result-lbl">Accuracy</span>
           </div>
           <div class="result-card">
-            <span class="r-val">${P.correct}</span>
-            <span class="r-lbl">Correct</span>
+            <span class="result-val">${P.correct}</span>
+            <span class="result-lbl">Correct</span>
           </div>
           <div class="result-card">
-            <span class="r-val">${P.total}</span>
-            <span class="r-lbl">Attempted</span>
+            <span class="result-val">${P.total}</span>
+            <span class="result-lbl">Attempted</span>
           </div>
           <div class="result-card">
-            <span class="r-val" style="color:var(--gold)">${P.bestStreak}</span>
-            <span class="r-lbl">Best streak</span>
+            <span class="result-val" style="color:var(--amber)">${P.bestStreak}</span>
+            <span class="result-lbl">Best streak</span>
           </div>
         </div>
-        <div class="hero-actions">
-          <button id="p-again" class="btn btn-primary">⚔ Practice again</button>
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:20px;flex-wrap:wrap">
+          <button id="p-again" class="btn btn-primary">Practice again</button>
           <a href="#/analysis/white" class="btn btn-secondary">♔ White analysis</a>
           <a href="#/analysis/black" class="btn btn-ghost">♚ Black analysis</a>
         </div>
-      </section>
+      </div>
     </div>
   `);
   document.getElementById('p-again')?.addEventListener('click', renderPractice);
@@ -1885,7 +1860,7 @@ function pracFlash(type) {
 }
 
 function updatePracticeStats() {
-  const cards = document.querySelectorAll('.practice-shell .metric-card .metric-value');
+  const cards = document.querySelectorAll('.practice-stats .metric-value');
   if (cards.length >= 4) {
     cards[0].textContent = P.streak;
     cards[1].textContent = P.correct;
@@ -1895,7 +1870,7 @@ function updatePracticeStats() {
   const badge = document.getElementById('p-streak-badge');
   if (badge) {
     badge.textContent = `Streak: ${P.streak}`;
-    badge.className = `status-pill${P.streak >= 5 ? ' status-good' : P.streak >= 3 ? ' status-info' : ''}`;
+    badge.className = `badge ${P.streak >= 5 ? 'badge-green' : P.streak >= 3 ? 'badge-blue' : 'badge-default'}`;
   }
 }
 
@@ -1905,7 +1880,7 @@ function setMsg(message) {
 }
 
 async function renderOpenings() {
-  setApp(`<div class="page-shell"><section class="panel loading-panel"><span class="spinner"></span><p>Loading openings…</p></section></div>`);
+  setApp(`<div class="page"><div class="loading"><span class="spinner"></span>Loading…</div></div>`);
   let white = [], black = [];
   try {
     [white, black] = await Promise.all([
@@ -1913,58 +1888,63 @@ async function renderOpenings() {
       GET('/openings/black').then(r => r.openings || []),
     ]);
   } catch (err) {
-    setApp(`<div class="page-shell"><section class="panel empty-block"><h2>Could not load opening data</h2><p>${esc(err.message)}</p></section></div>`);
+    setApp(`<div class="page"><div class="card"><div class="empty"><h2>Could not load openings</h2><p>${esc(err.message)}</p></div></div></div>`);
     return;
   }
 
   const renderTable = (items, color) => {
-    if (!items.length) return `<div class="empty-block compact"><h3>No opening data for ${color}</h3><p>Run analysis first.</p></div>`;
     const icon = color === 'white' ? '♔' : '♚';
+    if (!items.length) return `
+      <div class="card">
+        <div class="empty"><h2>${icon} ${color[0].toUpperCase() + color.slice(1)}</h2><p>No opening data yet — run analysis first.</p></div>
+      </div>`;
     return `
-      <section class="panel">
-        <div class="panel-head">
-          <div><p class="eyebrow">Opening breakdown</p><h2>${icon} ${color[0].toUpperCase() + color.slice(1)} repertoire</h2></div>
-          <span class="status-pill">${items.length} openings</span>
+      <div class="card">
+        <div class="card-head">
+          <h2>${icon} ${color[0].toUpperCase() + color.slice(1)}</h2>
+          <span class="badge badge-default">${items.length} openings</span>
         </div>
         <div class="opening-table">
-          <div class="opening-table-head">
+          <div class="opening-row-head">
             <span>Opening</span><span>Active</span><span>Mastered</span><span>Avg loss</span><span>Mastery</span>
           </div>
           ${items.map(op => {
             const pct = Math.round((op.mastery_rate || 0) * 100);
-            const barColor = pct >= 80 ? 'var(--green)' : pct >= 50 ? 'var(--amber)' : 'var(--red)';
+            const barFill = pct >= 80 ? 'var(--green)' : pct >= 50 ? 'var(--amber)' : 'var(--red)';
             return `
-              <div class="opening-table-row" role="button" tabindex="0"
+              <div class="opening-row" role="button" tabindex="0"
                    onclick="location.hash='#/analysis/${color}'"
-                   title="Click to open ${color} analysis">
-                <div class="opening-name-cell">
-                  ${op.eco !== '?' ? `<span class="opening-eco-chip">${esc(op.eco)}</span>` : ''}
-                  <span>${esc(op.name)}</span>
+                   title="Open ${color} analysis">
+                <div style="display:flex;align-items:center;gap:6px;overflow:hidden">
+                  ${op.eco !== '?' ? `<span class="eco">${esc(op.eco)}</span>` : ''}
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(op.name)}</span>
                 </div>
                 <span class="pill pill-mistake">${op.active}</span>
                 <span class="pill pill-good">${op.mastered_count || 0}</span>
                 <span style="color:var(--red);font-weight:600">${op.avg_cp_loss}cp</span>
-                <div class="mastery-bar-cell">
-                  <div class="mastery-bar-track"><div class="mastery-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>
-                  <span style="font-size:.78rem;min-width:2.5em">${pct}%</span>
+                <div class="mastery-bar">
+                  <div class="mastery-track"><div class="mastery-fill" style="width:${pct}%;background:${barFill}"></div></div>
+                  <span style="font-size:.75rem;min-width:2.5em">${pct}%</span>
                 </div>
               </div>
             `;
           }).join('')}
         </div>
-      </section>
+      </div>
     `;
   };
 
-  // Practice calendar
   let calData = [];
   try { calData = (await GET('/practice/calendar')).calendar || []; } catch { /* optional */ }
 
   setApp(`
-    <div class="page-shell">
+    <div class="page">
+      <div class="page-header"><h1>Openings</h1></div>
       ${renderCalendar(calData)}
-      ${renderTable(white, 'white')}
-      ${renderTable(black, 'black')}
+      <div style="display:flex;flex-direction:column;gap:16px">
+        ${renderTable(white, 'white')}
+        ${renderTable(black, 'black')}
+      </div>
     </div>
   `);
 }
@@ -1998,17 +1978,17 @@ function renderCalendar(calData) {
 
   const weekLabels = ['Mon', '', 'Wed', '', 'Fri', '', 'Sun'];
   return `
-    <section class="panel">
-      <div class="panel-head">
-        <div><p class="eyebrow">Activity</p><h2>Practice calendar</h2></div>
-        <span class="status-pill">${totalAttempts} total attempts</span>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head">
+        <h2>Practice activity</h2>
+        <span class="badge badge-default">${totalAttempts} attempts</span>
       </div>
-      <div class="cal-wrapper">
-        <div class="cal-day-labels">${weekLabels.map(d => `<span>${d}</span>`).join('')}</div>
+      <div class="cal-wrap">
+        <div class="cal-labels">${weekLabels.map(d => `<span>${d}</span>`).join('')}</div>
         <div class="cal-grid">${cells.join('')}</div>
       </div>
-      <p style="font-size:.78rem;color:var(--ink-2);margin-top:8px">Last 13 weeks of practice activity</p>
-    </section>
+      <p style="font-size:.71rem;color:var(--text3);margin-top:8px">Last 13 weeks</p>
+    </div>
   `;
 }
 
@@ -2043,43 +2023,41 @@ async function renderSnoozed() {
 async function renderLogs() {
   if (!S.status?.dev_mode) {
     setApp(`
-      <div class="page-shell">
-        <section class="panel empty-block roomy">
-          <h1>Developer logs are disabled</h1>
-          <p>Restart the app with <code>chess-analyzer --dev-mode</code> to expose the live log view.</p>
-        </section>
+      <div class="page">
+        <div class="card">
+          <div class="empty">
+            <h2>Developer logs are disabled</h2>
+            <p>Restart with <code>chess-analyzer --dev-mode</code> to enable.</p>
+          </div>
+        </div>
       </div>
     `);
     return;
   }
 
-  setApp(`<div class="page-shell"><section class="panel loading-panel"><span class="spinner"></span><p>Loading logs…</p></section></div>`);
+  setApp(`<div class="page"><div class="loading"><span class="spinner"></span>Loading…</div></div>`);
   let logs = [];
   try {
     logs = (await GET('/logs?limit=300')).logs || [];
   } catch (err) {
-    setApp(`<div class="page-shell"><section class="panel empty-block"><h2>Could not load logs</h2><p>${esc(err.message)}</p></section></div>`);
+    setApp(`<div class="page"><div class="card"><div class="empty"><h2>Error</h2><p>${esc(err.message)}</p></div></div></div>`);
     return;
   }
 
   setApp(`
-    <div class="page-shell">
-      <section class="panel logs-shell">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">Developer mode</p>
-            <h1>Runtime logs</h1>
-            <p class="panel-subtitle">Uploads, sync jobs, batch analysis progress, cancellations, and failures are recorded here.</p>
-          </div>
-          <div class="hero-actions">
-            <button id="btn-refresh-logs" class="btn btn-secondary">Refresh</button>
-            <span class="status-pill">${logs.length} entries</span>
+    <div class="page">
+      <div class="card">
+        <div class="card-head">
+          <h1>Runtime logs</h1>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button id="btn-refresh-logs" class="btn btn-secondary btn-sm">Refresh</button>
+            <span class="badge badge-default">${logs.length} entries</span>
           </div>
         </div>
         <div class="log-list">
-          ${logs.length ? logs.map(logRow).join('') : '<div class="empty-block compact"><h3>No logs yet</h3><p>Run a sync or analysis job to populate this view.</p></div>'}
+          ${logs.length ? logs.map(logRow).join('') : '<div class="empty" style="padding:20px"><h2>No logs yet</h2></div>'}
         </div>
-      </section>
+      </div>
     </div>
   `);
 
@@ -2091,7 +2069,7 @@ async function renderLogs() {
 }
 
 async function renderArchivePage(config) {
-  setApp(`<div class="page-shell"><section class="panel loading-panel"><span class="spinner"></span><p>Loading…</p></section></div>`);
+  setApp(`<div class="page"><div class="loading"><span class="spinner"></span>Loading…</div></div>`);
   let list = [];
   try {
     const [white, black] = await Promise.all([
@@ -2105,37 +2083,36 @@ async function renderArchivePage(config) {
       String(b.mastered_at || b.snoozed_at || '').localeCompare(String(a.mastered_at || a.snoozed_at || ''))
     );
   } catch (err) {
-    setApp(`<div class="page-shell"><section class="panel empty-block"><h2>Could not load this view</h2><p>${esc(err.message)}</p></section></div>`);
+    setApp(`<div class="page"><div class="card"><div class="empty"><h2>Error</h2><p>${esc(err.message)}</p></div></div></div>`);
     return;
   }
 
   if (!list.length) {
     setApp(`
-      <div class="page-shell">
-        <section class="panel empty-block roomy">
-          <h1>${config.emptyTitle}</h1>
-          <p>${config.emptyText}</p>
-        </section>
+      <div class="page">
+        <div class="card">
+          <div class="empty">
+            <h2>${config.emptyTitle}</h2>
+            <p>${config.emptyText}</p>
+          </div>
+        </div>
       </div>
     `);
     return;
   }
 
   setApp(`
-    <div class="page-shell">
-      <section class="panel">
-        <div class="panel-head">
+    <div class="page">
+      <div class="card">
+        <div class="card-head">
           <div>
-            <p class="eyebrow">Archive</p>
             <h1>${config.title}</h1>
-            <p class="panel-subtitle">${config.subtitle}</p>
+            <p style="font-size:.8rem;color:var(--text2);margin-top:2px">${config.subtitle}</p>
           </div>
-          <span class="status-pill">${list.length} total</span>
+          <span class="badge badge-default">${list.length} total</span>
         </div>
-        <div class="archive-list">
-          ${list.map(item => archiveRow(item, config.actionLabel)).join('')}
-        </div>
-      </section>
+        <div>${list.map(item => archiveRow(item, config.actionLabel)).join('')}</div>
+      </div>
     </div>
   `);
 
@@ -2156,15 +2133,15 @@ async function renderArchivePage(config) {
 function logRow(entry) {
   const details = entry.details ? JSON.stringify(entry.details, null, 2) : '';
   return `
-    <article class="log-row log-${esc(entry.level)}">
-      <div class="log-row-head">
-        <span class="status-pill ${entry.level === 'error' ? 'status-warn' : entry.level === 'warn' ? 'status-info' : ''}">${esc(entry.level)}</span>
+    <div class="log-row log-${esc(entry.level)}">
+      <div class="log-head">
+        <span class="badge ${entry.level === 'error' ? 'badge-red' : entry.level === 'warn' ? 'badge-amber' : 'badge-default'}">${esc(entry.level)}</span>
         <strong>${esc(entry.scope)}</strong>
         <span class="log-time">${esc(entry.created_at)}</span>
       </div>
-      <p class="log-message">${esc(entry.message)}</p>
-      ${details ? `<pre class="log-details">${esc(details)}</pre>` : ''}
-    </article>
+      <p class="log-msg">${esc(entry.message)}</p>
+      ${details ? `<pre class="log-detail">${esc(details)}</pre>` : ''}
+    </div>
   `;
 }
 
@@ -2174,16 +2151,12 @@ function archiveRow(item, actionLabel) {
     <div class="archive-row">
       <div class="archive-main">
         <span class="archive-icon">${item.color === 'white' ? '♔' : '♚'}</span>
-        <div>
-          <div class="archive-title-row">
-            <strong class="move-san">${esc(san)}</strong>
-            <span class="pill pill-cp">${item.avg_cp_loss}cp</span>
-            <span class="pill pill-freq">${item.pair_count}×</span>
-          </div>
-          <p>${esc(item.opening_name || 'Unlabeled opening')} ${item.opening_eco ? `· ${esc(item.opening_eco)}` : ''}</p>
+        <div class="archive-info">
+          <strong>${esc(san)} <span class="pill pill-cp">${item.avg_cp_loss}cp</span> <span class="pill pill-freq">${item.pair_count}×</span></strong>
+          <p>${esc(item.opening_name || 'Unlabeled opening')}${item.opening_eco ? ` · ${esc(item.opening_eco)}` : ''}</p>
         </div>
       </div>
-      <button class="btn btn-ghost archive-action" data-id="${item.id}">${actionLabel}</button>
+      <button class="btn btn-ghost btn-sm archive-action" data-id="${item.id}">${actionLabel}</button>
     </div>
   `;
 }
@@ -2243,11 +2216,11 @@ function onKey(evt) {
 
 function metricCard(value, label, hint) {
   return `
-    <article class="panel metric-card">
+    <div class="metric-card">
       <span class="metric-value">${value}</span>
-      <strong class="metric-label">${label}</strong>
-      <p class="metric-hint">${hint}</p>
-    </article>
+      <span class="metric-label">${label}</span>
+      ${hint ? `<p class="metric-hint">${hint}</p>` : ''}
+    </div>
   `;
 }
 
@@ -2277,16 +2250,16 @@ function liveJobCard(job) {
     const total = job.info.run_progress_total || 0;
     const pct = total > 0 ? Math.round((progress / total) * 100) : 0;
     return `
-      <article class="live-card">
-        <div class="live-card-head">
-          <span class="pill pill-analysis">${job.color === 'white' ? '♔ White analysis' : '♚ Black analysis'}</span>
+      <div class="job-card">
+        <div class="job-card-head">
+          <span>${job.color === 'white' ? '♔ White' : '♚ Black'} analysis</span>
           ${statusBadge(job.info.run_status, job.info.run_queue_position)}
         </div>
         <strong>${progress} / ${total || '?'} games analyzed</strong>
-        <p>${job.info.partial_mistakes_ready || 0} positions are ready to practice already.</p>
-        ${total ? `<div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>` : ''}
-        <a href="#/analysis/${job.color}" class="inline-link">Open ${job.color} queue</a>
-      </article>
+        <p>${job.info.partial_mistakes_ready || 0} positions ready to practice now.</p>
+        ${total ? `<div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>` : ''}
+        <a href="#/analysis/${job.color}" class="inline-link">Open ${job.color} queue →</a>
+      </div>
     `;
   }
 
@@ -2295,16 +2268,15 @@ function liveJobCard(job) {
   const requested = details.requested_limit || fetched || 0;
   const pct = requested > 0 ? Math.max(4, Math.min(100, Math.round((fetched / requested) * 100))) : 0;
   return `
-    <article class="live-card">
-      <div class="live-card-head">
-        <span class="pill pill-sync">${job.cfg.platform === 'lichess' ? '⚡' : '♟'} ${esc(job.cfg.username)}</span>
-        <span class="status-pill status-info">Syncing ${job.cfg.color}</span>
+    <div class="job-card">
+      <div class="job-card-head">
+        <span>${job.cfg.platform === 'lichess' ? '⚡' : '♟'} ${esc(job.cfg.username)}</span>
+        <span class="badge badge-blue">Syncing ${job.cfg.color}</span>
       </div>
       <strong>${fetched} / ${requested || '?'} fetched</strong>
-      <p>${details.total_games_after_merge || 0} usable games now · ${details.analysis_ready || 0} positions ready.</p>
-      <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
-      <p class="status-copy">Chunk ${details.chunk_index || 1} · batch size ${details.sync_batch_size || '?'}</p>
-    </article>
+      <p>${details.total_games_after_merge || 0} usable games · ${details.analysis_ready || 0} positions ready.</p>
+      <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+    </div>
   `;
 }
 
@@ -2314,26 +2286,26 @@ function syncLiveCard(cfg) {
   const requested = details.requested_limit || fetched || 0;
   const pct = requested > 0 ? Math.max(4, Math.min(100, Math.round((fetched / requested) * 100))) : 0;
   return `
-    <article class="live-card compact">
-      <div class="live-card-head">
-        <span class="pill pill-sync">${cfg.platform === 'lichess' ? '⚡' : '♟'} ${esc(cfg.username)}</span>
-        <span class="status-pill status-info">Fetching more games</span>
+    <div class="job-card">
+      <div class="job-card-head">
+        <span>${cfg.platform === 'lichess' ? '⚡' : '♟'} ${esc(cfg.username)}</span>
+        <span class="badge badge-blue">Fetching</span>
       </div>
       <strong>${fetched} / ${requested || '?'} fetched</strong>
-      <p>${details.total_games_after_merge || 0} usable now · ${details.analysis_ready || 0} positions already ready</p>
-      <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
-    </article>
+      <p>${details.total_games_after_merge || 0} usable now · ${details.analysis_ready || 0} positions ready</p>
+      <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+    </div>
   `;
 }
 
 function statusBadge(status, queuePosition = 0) {
-  if (!status) return '<span class="status-pill">Not run yet</span>';
-  if (status === 'queued') return `<span class="status-pill status-warn">Queued #${queuePosition || 1}</span>`;
-  if (status === 'running') return '<span class="status-pill status-info">Running</span>';
-  if (status === 'done') return '<span class="status-pill status-good">Ready</span>';
-  if (status === 'cancelled') return '<span class="status-pill status-info">Paused</span>';
-  if (status === 'error') return '<span class="status-pill status-warn">Needs retry</span>';
-  return `<span class="status-pill">${esc(status)}</span>`;
+  if (!status)              return '<span class="badge badge-default">Not run</span>';
+  if (status === 'queued')  return `<span class="badge badge-amber">Queued #${queuePosition || 1}</span>`;
+  if (status === 'running') return '<span class="badge badge-blue">Running</span>';
+  if (status === 'done')    return '<span class="badge badge-green">Ready</span>';
+  if (status === 'cancelled') return '<span class="badge badge-default">Paused</span>';
+  if (status === 'error')   return '<span class="badge badge-red">Error</span>';
+  return `<span class="badge badge-default">${esc(status)}</span>`;
 }
 
 function runLabel(status) {
@@ -2346,12 +2318,12 @@ function runLabel(status) {
 }
 
 function runDescription(status, queuePosition, error, progress = 0, total = 0, readyCount = 0) {
-  if (status === 'queued') return `Waiting for the single analysis worker. Queue position ${queuePosition || 1}. ${progress}/${total || '?'} games already analyzed.`;
-  if (status === 'running') return `Stockfish is evaluating game batches in the background. ${readyCount} positions are already ready to practice.`;
-  if (status === 'done') return 'Open the queue to review, filter, practice, and archive mistakes.';
-  if (status === 'cancelled') return total > progress ? `Paused at ${progress}/${total} games. You can continue later.` : 'This run was cancelled before it finished.';
+  if (status === 'queued') return `Queue position ${queuePosition || 1}. ${progress}/${total || '?'} games already analyzed.`;
+  if (status === 'running') return `${readyCount} positions ready to practice now.`;
+  if (status === 'done') return 'Open the queue to review, practice, and archive mistakes.';
+  if (status === 'cancelled') return total > progress ? `Paused at ${progress}/${total} games.` : 'Run was cancelled.';
   if (status === 'error') return error || 'The last run failed.';
-  return 'Start analysis to build a deliberate review queue from your uploaded games.';
+  return 'Start analysis to build a training queue from your games.';
 }
 
 function severityData(cp) {

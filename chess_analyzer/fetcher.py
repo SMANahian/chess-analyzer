@@ -200,11 +200,11 @@ def iter_chesscom_pgn_batches(
         }
 
 
-def sync_in_background(config_id: int) -> None:
-    threading.Thread(target=_sync_task, args=(config_id,), daemon=True).start()
+def sync_in_background(config_id: int, max_games: Optional[int] = None, full_resync: bool = False) -> None:
+    threading.Thread(target=_sync_task, args=(config_id, max_games, full_resync), daemon=True).start()
 
 
-def _sync_task(config_id: int) -> None:
+def _sync_task(config_id: int, max_games: Optional[int] = None, full_resync: bool = False) -> None:
     run_id = db.start_sync_run(config_id)
     stream_ctx: Optional[dict[str, Any]] = None
     stream_cancelled = False
@@ -221,7 +221,8 @@ def _sync_task(config_id: int) -> None:
         merged_content = existing["content"] if existing else ""
         total_games_after_merge = int(existing["game_count"]) if existing else 0
 
-        requested_limit = _LICHESS_MAX_GAMES if platform == "lichess" else _CHESSCOM_MAX_GAMES
+        default_limit = _LICHESS_MAX_GAMES if platform == "lichess" else _CHESSCOM_MAX_GAMES
+        requested_limit = max_games if max_games is not None else default_limit
         details: dict[str, Any] = {
             "platform": platform,
             "requested_limit": requested_limit,
@@ -251,7 +252,7 @@ def _sync_task(config_id: int) -> None:
 
         if platform == "lichess":
             since_ms: Optional[int] = None
-            if config["last_synced_at"]:
+            if config["last_synced_at"] and not full_resync:
                 ts = datetime.fromisoformat(config["last_synced_at"])
                 since_ms = int(ts.timestamp() * 1000)
             batches = iter_lichess_pgn_batches(username, color, since_ms=since_ms, max_games=requested_limit)
