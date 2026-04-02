@@ -19,6 +19,7 @@ const S = {
     opening: 'all',
     severity: 'all',
     sort: 'default',
+    threshold: 50,
   },
 };
 
@@ -368,19 +369,6 @@ function renderGames() {
         toast(err.message, 'error');
       }
     });
-    document.getElementById(`threshold-select-${color}`)?.addEventListener('change', async evt => {
-      try {
-        await api('PUT', '/settings/mistake-threshold', { threshold_cp: Number(evt.target.value) });
-        toast(`Mistake threshold set to ${evt.target.value}cp`, 'success');
-        // sync the other color's select too
-        const other = color === 'white' ? 'black' : 'white';
-        const otherSel = document.getElementById(`threshold-select-${other}`);
-        if (otherSel) otherSel.value = evt.target.value;
-        if (S.status) S.status.mistake_threshold_cp = Number(evt.target.value);
-      } catch (err) {
-        toast(err.message, 'error');
-      }
-    });
   });
 
   document.querySelectorAll('[data-toggle-opts]').forEach(btn =>
@@ -490,12 +478,6 @@ function analysisStatusBlock(color, info) {
             <option value="6"  ${(S.status?.analysis_depth || 6) === 6  ? 'selected' : ''}>Quick (depth 6)</option>
             <option value="10" ${(S.status?.analysis_depth || 6) === 10 ? 'selected' : ''}>Standard (depth 10)</option>
             <option value="16" ${(S.status?.analysis_depth || 6) === 16 ? 'selected' : ''}>Deep (depth 16)</option>
-          </select>
-          <select class="sel field-sm" id="threshold-select-${color}" title="CP loss threshold — lower = catch more mistakes">
-            <option value="80"  ${(S.status?.mistake_threshold_cp || 120) === 80  ? 'selected' : ''}>Precise (80cp)</option>
-            <option value="120" ${(S.status?.mistake_threshold_cp || 120) === 120 ? 'selected' : ''}>Standard (120cp)</option>
-            <option value="150" ${(S.status?.mistake_threshold_cp || 120) === 150 ? 'selected' : ''}>Lenient (150cp)</option>
-            <option value="200" ${(S.status?.mistake_threshold_cp || 120) === 200 ? 'selected' : ''}>Coarse (200cp)</option>
           </select>
           <button id="btn-analyze-${color}" class="btn btn-primary btn-sm" ${run === 'running' || run === 'queued' ? 'disabled' : ''}>
             ${actionLabel}
@@ -802,7 +784,7 @@ async function renderAnalysis(color, options = {}) {
     S.stats = data.stats || {};
     S.analysisMeta = data;
     S.allMistakes = data.mistakes || [];
-    S.filters = preserve && previousFilters ? previousFilters : { query: '', opening: 'all', severity: 'all', sort: 'default' };
+    S.filters = preserve && previousFilters ? previousFilters : { query: '', opening: 'all', severity: 'all', sort: 'default', threshold: 50 };
     if (!preserve) S.idx = 0;
     applyAnalysisFilters(false);
     if (preserve && previousKey) {
@@ -901,6 +883,16 @@ function buildAnalysisUI() {
                 <option value="blunder">Blunder 300+</option>
               </select>
             </div>
+            <select id="filter-threshold" class="sel field-sm" title="Minimum CP loss to show">
+              <option value="0">All mistakes</option>
+              <option value="50">≥ 50cp</option>
+              <option value="80">≥ 80cp</option>
+              <option value="100">≥ 100cp</option>
+              <option value="120">≥ 120cp</option>
+              <option value="150">≥ 150cp</option>
+              <option value="200">≥ 200cp</option>
+              <option value="300">≥ 300cp (blunders)</option>
+            </select>
             <select id="filter-sort" class="sel field-sm">
               <option value="default">Most frequent</option>
               <option value="cp">Worst cp loss</option>
@@ -953,6 +945,7 @@ function buildAnalysisUI() {
   openingSelect.value = S.filters.opening;
   document.getElementById('filter-query').value = S.filters.query;
   document.getElementById('filter-severity').value = S.filters.severity;
+  document.getElementById('filter-threshold').value = String(S.filters.threshold ?? 50);
   document.getElementById('filter-sort').value = S.filters.sort;
 
   document.getElementById('filter-query').addEventListener('input', evt => {
@@ -965,6 +958,10 @@ function buildAnalysisUI() {
   });
   document.getElementById('filter-severity').addEventListener('change', evt => {
     S.filters.severity = evt.target.value;
+    applyAnalysisFilters();
+  });
+  document.getElementById('filter-threshold').addEventListener('change', evt => {
+    S.filters.threshold = Number(evt.target.value);
     applyAnalysisFilters();
   });
   document.getElementById('filter-sort').addEventListener('change', evt => {
@@ -1046,7 +1043,9 @@ function applyAnalysisFilters(shouldRender = true) {
       || (S.filters.severity === 'mistake' && item.avg_cp_loss >= 150)
       || (S.filters.severity === 'inaccuracy' && item.avg_cp_loss >= 100);
 
-    return matchesQuery && matchesOpening && matchesSeverity;
+    const matchesThreshold = item.avg_cp_loss >= (S.filters.threshold || 0);
+
+    return matchesQuery && matchesOpening && matchesSeverity && matchesThreshold;
   });
 
   // Apply sort

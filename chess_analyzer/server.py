@@ -59,10 +59,6 @@ class AnalysisDepthIn(BaseModel):
     depth: int = Field(ge=1, le=30)
 
 
-class ThresholdCpIn(BaseModel):
-    threshold_cp: int = Field(ge=50, le=500)
-
-
 class OpponentIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     lichess_username: Optional[str] = Field(default=None, max_length=64)
@@ -141,7 +137,6 @@ async def status() -> JSONResponse:
             "dev_mode": _dev_mode(),
             "analysis_batch_games": analysis.ANALYSIS_BATCH_GAMES,
             "analysis_depth": int(db.get_setting("analysis_depth") or analysis.ANALYSIS_DEPTH),
-            "mistake_threshold_cp": int(db.get_setting("mistake_threshold_cp") or analysis.THRESHOLD_CP),
         }
     )
 
@@ -424,19 +419,6 @@ async def get_analysis_depth() -> JSONResponse:
     raw = db.get_setting("analysis_depth")
     depth = int(raw) if raw else analysis.ANALYSIS_DEPTH
     return JSONResponse({"depth": depth})
-
-
-@app.put("/api/settings/mistake-threshold")
-async def set_mistake_threshold(body: ThresholdCpIn) -> JSONResponse:
-    db.set_setting("mistake_threshold_cp", str(body.threshold_cp))
-    return JSONResponse({"ok": True, "threshold_cp": body.threshold_cp})
-
-
-@app.get("/api/settings/mistake-threshold")
-async def get_mistake_threshold() -> JSONResponse:
-    raw = db.get_setting("mistake_threshold_cp")
-    threshold_cp = int(raw) if raw else analysis.THRESHOLD_CP
-    return JSONResponse({"threshold_cp": threshold_cp})
 
 
 # ── Opponent prep ──────────────────────────────────────────────────────────

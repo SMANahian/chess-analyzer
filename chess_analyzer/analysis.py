@@ -20,7 +20,7 @@ import os
 
 ANALYSIS_DEPTH   = int(os.environ.get("ANALYSIS_DEPTH",        "6"))   # tuned for fast opening triage
 OPENING_PLIES    = int(os.environ.get("OPENING_PLIES_LIMIT",   "16"))
-THRESHOLD_CP     = int(os.environ.get("MISTAKE_THRESHOLD_CP",  "120"))
+THRESHOLD_CP     = int(os.environ.get("MISTAKE_THRESHOLD_CP",  "50"))
 MIN_OCCURRENCES  = int(os.environ.get("MIN_PAIR_OCCURRENCES",  "2"))
 MULTIPV          = int(os.environ.get("MULTIPV",               "2"))   # enough for fast opening blunder detection
 TOP_MOVE_DELTA   = int(os.environ.get("TOP_MOVE_THRESHOLD_CP", "35"))
@@ -34,8 +34,7 @@ ANALYSIS_MAX_CANDIDATES = int(os.environ.get("ANALYSIS_MAX_CANDIDATES", "250"))
 _ANALYSIS_QUEUE: "queue.Queue[tuple[str, int]]" = queue.Queue()
 _WORKER_LOCK = threading.Lock()
 _WORKER_THREAD: Optional[threading.Thread] = None
-_CURRENT_JOB_DEPTH: int = ANALYSIS_DEPTH          # set per job by _run_analysis_job
-_CURRENT_JOB_THRESHOLD: int = THRESHOLD_CP         # set per job by _run_analysis_job
+_CURRENT_JOB_DEPTH: int = ANALYSIS_DEPTH  # set per job by _run_analysis_job
 
 
 class AnalysisCancelled(Exception):
@@ -182,7 +181,6 @@ def analyze(
     color: str,
     progress_cb: Any = None,
     should_cancel: Optional[Callable[[], bool]] = None,
-    threshold_cp: int = THRESHOLD_CP,
 ) -> list[dict[str, Any]]:
     """Run Stockfish analysis and return a list of mistake dicts.
 
@@ -274,7 +272,7 @@ def analyze(
 
             mover_white = board.turn == chess.WHITE
             cp_loss = (best_cp - cp_after) if mover_white else (cp_after - best_cp)
-            if cp_loss <= threshold_cp:
+            if cp_loss <= THRESHOLD_CP:
                 continue
 
             op = openings.get((pos_key, user_move))
@@ -334,7 +332,7 @@ def _analysis_worker() -> None:
 
 
 def _run_analysis_job(color: str, run_id: int) -> None:
-    global _CURRENT_JOB_DEPTH, _CURRENT_JOB_THRESHOLD
+    global _CURRENT_JOB_DEPTH
     depth_setting = db.get_setting("analysis_depth")
     if depth_setting is not None:
         try:
@@ -343,14 +341,6 @@ def _run_analysis_job(color: str, run_id: int) -> None:
             _CURRENT_JOB_DEPTH = ANALYSIS_DEPTH
     else:
         _CURRENT_JOB_DEPTH = ANALYSIS_DEPTH
-    threshold_setting = db.get_setting("mistake_threshold_cp")
-    if threshold_setting is not None:
-        try:
-            _CURRENT_JOB_THRESHOLD = max(50, min(500, int(threshold_setting)))
-        except (ValueError, TypeError):
-            _CURRENT_JOB_THRESHOLD = THRESHOLD_CP
-    else:
-        _CURRENT_JOB_THRESHOLD = THRESHOLD_CP
 
     pgn_row = db.get_pgn(color)
     if not pgn_row:
@@ -662,7 +652,7 @@ def _refresh_pair_state(
 
     mover_white = board.turn == chess.WHITE
     cp_loss = (best_cp - cp_after) if mover_white else (cp_after - best_cp)
-    if cp_loss <= _CURRENT_JOB_THRESHOLD:
+    if cp_loss <= THRESHOLD_CP:
         db.remove_active_mistake(color, fen, user_move)
         return
 
