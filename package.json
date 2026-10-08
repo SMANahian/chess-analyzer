@@ -1,16 +1,46 @@
 {
   "name": "chess-analyzer",
-  "description": "Browser smoke tests for the Chess Analyzer local app",
+  "version": "3.0.0",
+  "description": "Find and fix your recurring chess opening mistakes. Runs entirely in your browser with Stockfish.",
   "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "S M A Nahian",
+  "homepage": "https://smanahian.github.io/chess-analyzer/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SMANahian/chess-analyzer.git"
+  },
   "engines": {
     "node": ">=20"
   },
   "scripts": {
+    "postinstall": "node scripts/build-openings.mjs",
+    "dev": "vite",
+    "build": "node scripts/build-openings.mjs && tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed",
-    "test:e2e:install": "playwright install chromium"
+    "bench": "node scripts/bench/bench.mjs"
+  },
+  "dependencies": {
+    "@lichess-org/chessground": "~10.2.0",
+    "@preact/signals": "^2.11.3",
+    "chessops": "^0.15.1",
+    "dexie": "^4.4.6",
+    "preact": "^10.29.8"
   },
   "devDependencies": {
-    "@playwright/test": "^1.54.2"
+    "@babel/core": "^7.28.0",
+    "@playwright/test": "1.56.1",
+    "@preact/preset-vite": "^2.10.6",
+    "@types/node": "^22.15.0",
+    "fake-indexeddb": "^6.2.5",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.3",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^5.0.3"
   }
 }
