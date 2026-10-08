@@ -1,0 +1,8 @@
+{
+  "id": "testhero",
+  "username": "TestHero",
+  "count": {
+    "all": 400,
+    "rated": 365
+  }
+}

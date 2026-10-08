@@ -1,0 +1,9 @@
+{
+  "@id": "https://api.chess.com/pub/player/testhero",
+  "url": "https://www.chess.com/member/TestHero",
+  "username": "testhero",
+  "player_id": 424242,
+  "status": "basic",
+  "joined": 1591012800,
+  "last_online": 1790798400
+}

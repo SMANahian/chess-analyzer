@@ -1,0 +1,13 @@
+{
+  "name": "chess-analyzer-engine-bench",
+  "private": true,
+  "type": "module",
+  "description": "Engine benchmark harness (separate install: the stockfish npm package is ~160 MB).",
+  "scripts": {
+    "bench": "node bench.mjs"
+  },
+  "dependencies": {
+    "chessops": "^0.15.1",
+    "stockfish": "19.0.0"
+  }
+}

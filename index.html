@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Chess Analyzer — find and fix your opening mistakes</title>
+    <meta
+      name="description"
+      content="Find the opening mistakes you keep repeating in your Lichess and Chess.com games, and fix them with spaced repetition. Free, private, runs in your browser with Stockfish."
+    />
+    <meta name="theme-color" content="#161512" />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Chess Analyzer" />
+    <meta property="og:title" content="Chess Analyzer — find and fix your opening mistakes" />
+    <meta
+      property="og:description"
+      content="Find the opening mistakes you keep repeating — and fix them. Free, private, runs in your browser."
+    />
+    <meta property="og:url" content="https://smanahian.github.io/chess-analyzer/" />
+    <!-- A PNG: most link previews (Facebook, X, LinkedIn, chat apps) do not render SVG. -->
+    <meta property="og:image" content="https://smanahian.github.io/chess-analyzer/icon-512.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
+    <meta property="og:image:alt" content="Chess Analyzer logo" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:image" content="https://smanahian.github.io/chess-analyzer/icon-512.png" />
+    <meta name="twitter:image:alt" content="Chess Analyzer logo" />
+    <script>
+      // Theme before first paint (same rules as src/ui/theme.ts): saved choice, else the system, else dark.
+      (function () {
+        var pref = null;
+        try {
+          pref = localStorage.getItem('ca:theme');
+        } catch (e) {}
+        var light =
+          pref === 'light' ||
+          (pref !== 'dark' && !!window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+        var theme = light ? 'light' : 'dark';
+        var root = document.documentElement;
+        root.setAttribute('data-theme', theme);
+        root.style.colorScheme = theme;
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', light ? '#f6f5f2' : '#161512');
+      })();
+    </script>
+  </head>
+  <body>
+    <noscript>
+      <div style="max-width: 560px; margin: 15vh auto; padding: 0 16px; font: 16px/1.5 system-ui, sans-serif">
+        <h1 style="font-size: 1.5rem">Chess Analyzer needs JavaScript</h1>
+        <p>
+          It downloads your games, runs Stockfish and keeps your progress — all inside your browser. Please enable
+          JavaScript for this site and reload.
+        </p>
+      </div>
+    </noscript>
+    <div id="app"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

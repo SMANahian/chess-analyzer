@@ -1,0 +1,87 @@
+name: Live smoke
+
+# Runs the built app in Chromium against the real Lichess and Chess.com APIs for real accounts
+# (GitHub-hosted runners can reach both sites): checks CORS from the app's origin, onboards the
+# accounts through the UI, waits for the analysis and publishes a summary of what it found.
+on:
+  workflow_dispatch:
+    inputs:
+      lichess_user:
+        description: Lichess username (empty to skip Lichess)
+        type: string
+        default: SMA-Nahian
+      chesscom_user:
+        description: Chess.com username (empty to skip Chess.com)
+        type: string
+        default: SMA-Nahian
+      games:
+        description: Games per account
+        type: number
+        default: 300
+  schedule:
+    - cron: '23 5 * * 1' # weekly, Monday 05:23 UTC
+  push:
+    paths:
+      - src/sources/**
+      - src/services/sync.ts
+      - e2e/live/**
+      - playwright.live.config.ts
+      - .github/workflows/live-smoke.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Job-level env may only use the github, inputs, vars, secrets, needs, strategy and matrix contexts.
+    # `inputs` is empty for schedule/push runs, hence the defaults. A manual run with an emptied
+    # field passes ' ' so that account is skipped instead of falling back to the default.
+    env:
+      LIVE_LICHESS_USER: ${{ github.event_name == 'workflow_dispatch' && (inputs.lichess_user || ' ') || 'SMA-Nahian' }}
+      LIVE_CHESSCOM_USER: ${{ github.event_name == 'workflow_dispatch' && (inputs.chesscom_user || ' ') || 'SMA-Nahian' }}
+      LIVE_GAMES: ${{ inputs.games || 300 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Live smoke test
+        run: npx playwright test --config playwright.live.config.ts
+
+      - name: Upload summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-smoke-summary
+          path: test-results/live-summary.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-smoke-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14
