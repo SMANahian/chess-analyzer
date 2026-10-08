@@ -42,7 +42,7 @@ export function useSwipe<T extends HTMLElement>(handlers: { onLeft?(): void; onR
 
 /** True when a key event comes from a text field (shortcuts must not fire while typing). */
 export function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
+  if (typeof HTMLElement === 'undefined' || !(target instanceof HTMLElement)) return false;
   return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 }
 
@@ -50,5 +50,22 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 export function isShortcut(e: KeyboardEvent): boolean {
   if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return false;
   if (isTypingTarget(e.target)) return false;
-  return !(e.target instanceof Element && e.target.closest('dialog[open]'));
+  return !(typeof Element !== 'undefined' && e.target instanceof Element && e.target.closest('dialog[open]'));
+}
+
+/** Character keys used as shortcuts (j, k, f, ?, h, Space): only when the user has them turned on. */
+export const CHARACTER_SHORTCUTS: ReadonlySet<string> = new Set(['j', 'k', 'f', '?', 'h', ' ']);
+
+/**
+ * isShortcut, plus: a character key counts only while single-key shortcuts are on (`enabled`,
+ * Settings → Appearance). Other keys (arrows, Escape, Enter) are not affected by the setting.
+ */
+export function isKeyShortcut(e: KeyboardEvent, enabled: boolean): boolean {
+  if (!isShortcut(e)) return false;
+  return enabled || !CHARACTER_SHORTCUTS.has(e.key);
+}
+
+/** The key event's target is the page itself (nothing focused), not a control. */
+export function isPageTarget(target: EventTarget | null): boolean {
+  return typeof document !== 'undefined' && (target === document.body || target === document.documentElement || target === document);
 }

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { START_FEN, playUci } from '../../core/chess';
 import { DEFAULT_FILTERS, type Mistake, type Occurrence, type ViewFilters } from '../../core/types';
@@ -8,6 +9,8 @@ import {
   groupByParent,
   groupFamilies,
   lastMoveLabel,
+  leakBoardLabel,
+  movesSoFar,
   punishmentOf,
   punishmentText,
   standingText,
@@ -31,6 +34,7 @@ import {
   toggleSpeed,
   viewOfMistake,
 } from './leakView';
+import { moveLabel } from './format';
 
 const NOW = Date.UTC(2026, 9, 8, 12);
 const DAY = 86_400_000;
@@ -301,5 +305,63 @@ describe('groupFamilies', () => {
     ]);
     expect(fams[0]!.score).toBeCloseTo(0.5);
     expect(fams[0]!.variations.map(v => v.games)).toEqual([30, 10]);
+  });
+});
+
+describe('explanations judged against the best line (demo data)', () => {
+  const demo = JSON.parse(readFileSync(new URL('../../../public/demo/demo.json', import.meta.url), 'utf8')) as { mistakes: Mistake[] };
+  const byShort = (id: string): Mistake => {
+    const m = demo.mistakes.find(x => x.shortId === id);
+    if (!m) throw new Error(`demo mistake ${id} missing`);
+    return m;
+  };
+
+  it('does not blame 3…Qa5 for the pawn that 3…e6 gives up as well', () => {
+    const m = byShort('e85a02ed2a');
+    const text = punishmentText(moveLabel(m.fen, m.move), punishmentOf(m));
+    expect(text).not.toContain('loses a pawn');
+    expect(text).toMatch(/^After 4\.Bxc4, /);
+  });
+
+  it('keeps the "loses …" sentence for a piece that really hangs', () => {
+    const fen = ['e2e4', 'e7e5', 'g1f3', 'b8c6'].reduce((f, u) => playUci(f, u)!, START_FEN);
+    // 3.Ng5?? Qxg5 against 3.Bc4 Nf6 4.d3 Bc5.
+    const hang = mistake({
+      color: 'white',
+      fen,
+      path: ['e2e4', 'e7e5', 'g1f3', 'b8c6'],
+      move: 'f3g5',
+      bestMove: 'f1c4',
+      playedLine: ['f3g5', 'd8g5', 'b1c3', 'g8f6'],
+      bestLine: ['f1c4', 'g8f6', 'd2d3', 'f8c5'],
+      scoreBest: { cp: 40 },
+      scorePlayed: { cp: -560 },
+    });
+    expect(punishmentText('3.Ng5', punishmentOf(hang))).toBe('3.Ng5 loses a piece after 3…Qxg5.');
+  });
+
+  it('gives the engine’s own pawn drop in the headline', () => {
+    const m = byShort('60dbd1b946'); // −2.25 → −7.23
+    expect(headlineOf(m, m.count, m.positionCount).pawns).toBe('≈5.0 pawns');
+  });
+});
+
+describe('board text for screen readers', () => {
+  const m = mistake();
+  it('describes the leak position with its arrows only at the root', () => {
+    expect(leakBoardLabel(m, null)).toBe(
+      'Position after 5.exd5. Black to move. Orange arrow: your usual 5…Nxd5. Blue arrow: the best move, 5…Na5.',
+    );
+  });
+  it('follows the cursor along the path and the lines, without the arrows', () => {
+    expect(leakBoardLabel(m, { line: 'path', index: -1 })).toBe('Starting position. White to move.');
+    expect(leakBoardLabel(m, { line: 'path', index: 2 })).toBe('Position after 2.Nf3, on the way to the leak. Black to move.');
+    expect(leakBoardLabel(m, { line: 'best', index: 1 })).toBe('Position after 6.Bb5+ in the best line. Black to move.');
+    expect(leakBoardLabel(m, { line: 'played', index: 0 })).toBe('Position after 5…Nxd5 in the line after your 5…Nxd5. White to move.');
+    expect(leakBoardLabel(m, { line: 'played', index: 1 })).not.toContain('arrow');
+  });
+  it('lists the moves leading to a training position', () => {
+    expect(movesSoFar(['e2e4', 'c7c5', 'g1f3'])).toBe('Moves so far: 1.e4 c5 2.Nf3.');
+    expect(movesSoFar([])).toBe('The starting position.');
   });
 });

@@ -30,7 +30,9 @@ export default defineConfig({
     ...(process.env.E2E_WEBKIT === '1' ? [{ name: 'webkit', use: { ...devices['Desktop Safari'], viewport: { width: 1280, height: 900 } } }] : []),
   ],
   webServer: {
-    command: `npm run build && npx vite preview --port ${PORT} --strictPort`,
+    // In CI the workflow's Build step has just built (and checked) dist/, so only serve it; locally,
+    // build first. (A preview server already running on the port is reused locally.)
+    command: `${CI ? '' : 'npm run build && '}npx vite preview --port ${PORT} --strictPort`,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !CI,
     timeout: 300_000,

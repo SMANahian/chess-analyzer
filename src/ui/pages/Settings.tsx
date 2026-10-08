@@ -4,13 +4,15 @@ import type { JSX } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import * as store from '../../state/store';
 import type { Account, AnalysisPreset, Settings as AppSettings } from '../../core/types';
-import { ConfirmButton, CopyButton } from '../components/buttons';
+import { CopyButton } from '../components/buttons';
+import { DeleteAllData } from '../components/DeleteAllData';
 import { collectDiagnostics } from '../components/diagnostics';
 import { friendlyError } from '../components/errors';
 import { Field, FileButton, RangeField, Segmented, Toggle } from '../components/forms';
 import { formatCount, isoDate, relativeTime } from '../components/format';
 import { downloadBlob, runAction, toast, useAction, useNow } from '../components/hooks';
 import { Icon } from '../components/Icon';
+import { setShortcutsOn, shortcutsOn } from '../components/keyboard';
 import { Banner } from '../components/Notice';
 import { Spinner } from '../components/Spinner';
 import { navigate, href, type PageProps } from '../router';
@@ -277,6 +279,12 @@ function AppearanceSection({ s }: { s: AppSettings }): JSX.Element {
           save({ theme });
         }}
       />
+      <Toggle
+        label="Keyboard shortcuts"
+        hint="Single-key shortcuts: j / k for the next and previous leak, f to flip the board, ? for help, h for a hint and Space to skip the replay in training. Saved on this device."
+        checked={shortcutsOn.value}
+        onChange={setShortcutsOn}
+      />
     </Section>
   );
 }
@@ -296,9 +304,9 @@ function DataSection({ s }: { s: AppSettings }): JSX.Element {
       const blob = await store.exportMistakesPgn();
       downloadBlob(blob, `chess-analyzer-leaks-${isoDate(Date.now())}.pgn`);
     });
-  const clearAll = async (): Promise<void> => {
-    const ok = await runAction(() => store.clearData(), { success: 'All data deleted from this browser.' });
-    if (ok) navigate(href('home'));
+  const deleted = (): void => {
+    toast('success', 'All data deleted from this browser.');
+    navigate(href('home'));
   };
   return (
     <Section id="data" title="Your data" intro="Everything lives in this browser only. Back it up to move to another device or browser.">
@@ -319,9 +327,7 @@ function DataSection({ s }: { s: AppSettings }): JSX.Element {
       <hr />
       <div class="settings-actions">
         <CopyButton text={() => collectDiagnostics()} label="Copy diagnostics" class="btn" />
-        <ConfirmButton onConfirm={clearAll} confirmLabel="Click again to delete everything">
-          <Icon name="trash" size={18} /> Delete all data
-        </ConfirmButton>
+        <DeleteAllData onDeleted={deleted} />
       </div>
       <p class="small muted">Diagnostics contain your settings and app state but no games — paste them into a bug report.</p>
     </Section>

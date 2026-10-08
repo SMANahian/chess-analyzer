@@ -65,6 +65,10 @@ export interface BoardProps {
   coordinates?: boolean;
   /** Accessible description, e.g. "Position after 5…Nc6. You are White, to move." */
   label?: string;
+  /** Id of an element that describes the board further (e.g. the moves so far, as text). */
+  describedBy?: string;
+  /** Puts the board in the Tab order (for pages where keys act on it, e.g. ←/→ to step through moves). */
+  focusable?: boolean;
   controller?: Ref<BoardController | null>;
   class?: string;
 }
@@ -268,6 +272,8 @@ export function Board(props: BoardProps): JSX.Element {
       class={`board${replaying ? ' is-replaying' : ''}${props.class ? ` ${props.class}` : ''}`}
       role="group"
       aria-label={label ?? 'Chess board'}
+      aria-describedby={props.describedBy}
+      tabIndex={props.focusable ? 0 : undefined}
     >
       <div class="board-ground" ref={groundRef} />
       {promotion ? <PromotionPicker {...promotion} orientation={orientation} onPick={pickPromotion} /> : null}

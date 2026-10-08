@@ -35,9 +35,54 @@ export function useMediaQuery(query: string): boolean {
 export const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 export const prefersReducedMotion = (): boolean => mediaMatches(REDUCED_MOTION);
 
+/** Focus handling of a toast with an action (see NoticeHost). */
+export interface ToastFocus {
+  /** Move focus to the action button (the action was started from the keyboard). */
+  focusAction?: boolean;
+  /** Where focus goes when the toast closes while it holds focus (default: <main>). */
+  returnFocus?(): HTMLElement | null;
+}
+
+const toastFocus = new WeakMap<store.Notice, ToastFocus>();
+export const toastFocusOf = (n: store.Notice): ToastFocus | undefined => toastFocus.get(n);
+
 /** Shows a store notice. */
-export function toast(kind: store.Notice['kind'], text: string, action?: store.Notice['action']): void {
-  store.notice.value = action ? { kind, text, action } : { kind, text };
+export function toast(kind: store.Notice['kind'], text: string, action?: store.Notice['action'], focus?: ToastFocus): void {
+  const n: store.Notice = action ? { kind, text, action } : { kind, text };
+  if (focus) toastFocus.set(n, focus);
+  store.notice.value = n;
+}
+
+export interface Debounced<A extends unknown[]> {
+  (...args: A): void;
+  /** Runs a pending call now. */
+  flush(): void;
+  cancel(): void;
+}
+
+/** Calls `fn` once calls stop for `ms` (with the last arguments); flush() runs a pending call at once. */
+export function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): Debounced<A> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let pending: A | null = null;
+  const run = (): void => {
+    clearTimeout(timer);
+    timer = undefined;
+    const args = pending;
+    pending = null;
+    if (args) fn(...args);
+  };
+  const d = (...args: A): void => {
+    pending = args;
+    clearTimeout(timer);
+    timer = setTimeout(run, ms);
+  };
+  d.flush = run;
+  d.cancel = (): void => {
+    clearTimeout(timer);
+    timer = undefined;
+    pending = null;
+  };
+  return d;
 }
 
 /**

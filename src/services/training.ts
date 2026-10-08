@@ -75,6 +75,41 @@ export function buildSession(ms: readonly Mistake[], reviews: readonly ReviewSta
   return parentsFirst(picked);
 }
 
+/** What a session started now could hold, with no size limit (see sessionCounts). */
+export interface SessionCounts {
+  /** Reviewed cards that are due (due ≤ now). */
+  dueReviews: number;
+  /** New (never reviewed) cards still allowed today: min(newPerDay − newToday, never-reviewed cards). */
+  newAvailable: number;
+  /** dueReviews + newAvailable: the length of buildSession(...) with an unlimited size. */
+  total: number;
+}
+
+/**
+ * The counts behind buildSession without building it (one filter pass, no sorting of cards, no
+ * parent ordering): due reviews and the new cards still available today, under the same filters.
+ */
+export function sessionCounts(
+  ms: readonly Mistake[],
+  reviews: ReadonlyMap<string, ReviewState> | readonly ReviewState[],
+  now: number,
+  opts: Omit<SessionOptions, 'size'>,
+): SessionCounts {
+  const filters: ViewFilters = { ...DEFAULT_FILTERS, ...opts.filters };
+  const review: ReadonlyMap<string, ReviewState> = Array.isArray(reviews)
+    ? new Map((reviews as readonly ReviewState[]).map(r => [r.mistakeId, r]))
+    : (reviews as ReadonlyMap<string, ReviewState>);
+  let dueReviews = 0;
+  let unseen = 0;
+  for (const view of applyFilters(ms, filters, now)) {
+    const r = review.get(view.id);
+    if (!r) unseen++;
+    else if (r.due <= now) dueReviews++;
+  }
+  const newAvailable = Math.min(Math.max(0, opts.newPerDay - opts.newToday), unseen);
+  return { dueReviews, newAvailable, total: dueReviews + newAvailable };
+}
+
 /**
  * Up to `slots` new cards by impact, a card's never-seen parents (dependsOn, themselves new cards here)
  * first: the child position usually arises only after the parent's error, so it is learned second.

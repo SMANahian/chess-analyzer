@@ -1,5 +1,5 @@
 // Pure formatting helpers for UI copy (no DOM). Everything user-facing reads from the USER's side.
-import { posFromFen, sanOf } from '../../core/chess';
+import { posFromFen, sanOfCached } from '../../core/chess';
 import { formatScore, scoreForColor } from '../../core/winrate';
 import type { Color, Platform, Score, Speed } from '../../core/types';
 
@@ -60,7 +60,8 @@ export function formatCountdown(ms: number): string {
 
 /** The move as a chess player writes it in a sentence: '6…Nxe4', '7.Qe2'. Falls back to the UCI string. */
 export function moveLabel(fen: string, uci: string): string {
-  const san = sanOf(fen, uci);
+  // Memoised: list rows ask for the same labels on every render.
+  const san = sanOfCached(fen, uci);
   if (!san) return uci;
   const parts = fen.split(' ');
   const moveNo = Number(parts[5]) || 1;
@@ -86,6 +87,24 @@ export function evalWords(s: Score): string {
   if (abs <= 180) return side;
   if (abs <= 400) return `clearly ${side}`;
   return cp > 0 ? 'winning' : 'losing';
+}
+
+/** Centipawns beyond this count as "≥10 pawns" (the engine scale the win-% curve is clamped to). */
+const PAWN_DROP_CLAMP_CP = 1000;
+
+/**
+ * The engine's own drop between the best move and the move played, in pawns: '≈5.0 pawns', '≥10 pawns'.
+ * Both are side-to-move scores of the same position, so no sign flip is needed. A mate in either score
+ * (or a drop of 10 pawns or more) reads '≥10 pawns'. Unlike describeLoss (win-% converted as if the
+ * position were level), this agrees with the before → after evaluation printed next to it.
+ */
+export function describePawnDrop(best: Score, played: Score): string {
+  if (best.mate !== undefined || played.mate !== undefined) return '≥10 pawns';
+  const clamp = (cp: number | undefined): number => Math.max(-PAWN_DROP_CLAMP_CP, Math.min(PAWN_DROP_CLAMP_CP, cp ?? 0));
+  const pawns = Math.max(0, clamp(best.cp) - clamp(played.cp)) / 100;
+  if (pawns >= PAWN_DROP_CLAMP_CP / 100) return '≥10 pawns';
+  const shown = pawns.toFixed(1);
+  return `≈${shown} ${shown === '1.0' ? 'pawn' : 'pawns'}`;
 }
 
 /** A side-to-move score as '+0.30' from `viewer`'s side. */

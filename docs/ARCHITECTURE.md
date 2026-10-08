@@ -70,8 +70,9 @@ lines), and Lichess asks that the endpoint be used for "a few positions here and
 ## Aggregation (core/aggregate.ts)
 
 Input: the profile's stored games, `openingPlies` (default 20). For each game, replay its UCI moves; at
-each ply where the profile is to move record (posKey, move). Counting is by **distinct games** (a
-repetition inside one game counts once).
+each ply where the profile is to move record (posKey, move). Counting is by **distinct games**: only the
+first visit of a position in a game counts, its move included (a repetition inside one game counts
+once), so a move's game count never exceeds the position's.
 
 Pass 1 counts `(posKey|move)` and `posKey` distinct-game totals only (low memory). Candidate positions
 are those with at least one move seen in ≥ `ANALYSIS_MIN_GAMES` (2) games. Pass 2 builds details only for
@@ -124,9 +125,10 @@ filtered occurrences, so changing a filter is instant and never touches the engi
 - **Lichess** — `GET /api/games/user/{u}` NDJSON, `perfType` = all standard speeds, `moves=true`,
   streamed. Each account keeps a contiguous covered interval `[oldestCreatedAt, newestCreatedAt]`.
   - Forward pass: `sort=dateAsc&since=newestCreatedAt − 3 days` (duplicates are skipped), so an
-    interrupted run never leaves a gap.
+    interrupted run never leaves a gap. It is not capped by the run's game limit: it keeps paging while
+    pages come back full (at most 50 requests), so after a long break every new game is stored.
   - Backfill pass: `sort=dateDesc&until=oldestCreatedAt − 1&max=remaining` until `gamesPerAccount` is
-    reached or the stream ends (`reachedStart`).
+    reached or the stream ends (`reachedStart`), if the forward pass left some of the run's budget.
   - The cursor advances per stored chunk **in the same IndexedDB transaction** as the games.
   - Anonymous exports are throttled by Lichess to 20 games/s; the UI shows an ETA. A 45 s no-data
     watchdog aborts and resumes. HTTP 429 → 60 s cooldown shared across tabs (localStorage).
@@ -145,7 +147,8 @@ filtered occurrences, so changing a filter is instant and never touches the engi
 
 Session = due reviews first (oldest due first), then new cards by impact (max `newPerDay` new cards per
 day), `sessionSize` cards (10). Parents (`dependsOn`) before children. Book and low-confidence items are
-excluded by default.
+excluded by default. The counts the UI shows (`sessionCounts`: due reviews, new cards still allowed
+today, their sum) come from one filter pass with the same rules, without building a session.
 
 Card flow: replay the last `replayPlies` plies (skippable, disabled with `prefers-reduced-motion`), then
 "Your move (you are Black)" with the opponent's last move highlighted and no arrows. Grading is
@@ -186,18 +189,46 @@ leaks shown from your side ("they play 6…Nxe4?! in 7 of 9 games — punish wit
 `navigator.storage.persist()` is requested after the first analysis; if storage is not persistent the
 app shows backup reminders (Safari deletes site data after 7 days without a visit unless installed).
 
+Backups (`db/backup.ts`) are JSON files of every table except the eval cache: the analysis trusts cached
+evals, so a file must not be able to plant them, and they are cheap to recompute. Every nested field is
+validated before anything is written (a damaged file changes nothing), and settings are clamped to what
+the Settings page can produce. A restore replaces all profiles, games, progress and settings; this
+browser's eval cache and its persistent-storage state stay. The bundled example is merged next to the
+user's data instead.
+
 ## Concurrency between tabs
 
 A Web Lock (`chess-analyzer:jobs`) ensures only one tab runs sync/analysis; other tabs show "running in
-another tab" and refresh when a `BroadcastChannel` message says the job finished. A Screen Wake Lock is
+another tab" and refresh when a `BroadcastChannel` message says the job finished. A tab that is closed or
+crashes mid-job never sends that message, but the browser releases its lock, so a waiting tab also
+re-checks the lock every 5 s and whenever it becomes visible again. A Screen Wake Lock is
 held during analysis; when the page becomes visible again an interrupted analysis resumes (cheap thanks
 to the eval cache). PWA updates use a prompt and are never applied while a job is running.
+
+## Build and deployment
+
+The production build is a set of static files for GitHub Pages, which cannot send HTTP headers, so:
+
+- `index.html` carries a **Content-Security-Policy** `<meta>` added at build time
+  (`scripts/vite-plugins.ts`): scripts only from the site itself plus the inline theme script by its
+  SHA-256 hash (computed from the final HTML, so it cannot go stale), workers and the service worker from
+  the site, network requests only to the site, `lichess.org` and `api.chess.com`, images from the site and
+  `data:` URIs, styles from the site (Preact and chessground set styles through the CSSOM, which the
+  policy does not restrict) plus the `<noscript>` message's inline styles by hash, and no plugins,
+  `<base>` or form submissions. It is build-only: Vite's dev server injects inline styles and scripts.
+- `THIRD-PARTY-LICENSES.md` ships next to `index.html` with the licence text (and NOTICE file) of every
+  package in the bundle and the service worker; the engine's GPL text ships as `engine/COPYING.txt`.
+- `scripts/check-dist.mjs` runs after every `npm run build` and fails it when the CSP does not allow an
+  inline script, a bundled package (read from the source maps) has no licence section, or the manifest's
+  maskable icon is a regular icon.
+- `.github/workflows/pages.yml` deploys only after CI (unit tests, build, e2e on the production build)
+  has passed for the commit on `master`.
 
 ## Testing
 
 - Unit tests (Vitest) for every core/source/engine/db/service module, with `fake-indexeddb`.
 - A real-engine integration test runs the vendored WASM in Node.
 - Playwright e2e runs the production build in Chromium with Lichess/Chess.com mocked from recorded
-  fixtures and the real WASM engine.
+  fixtures and the real WASM engine, under the build's CSP: every test fails on a CSP violation.
 - `live-smoke` GitHub Actions workflow runs the built app against the real APIs for real accounts
   (GitHub's runners can reach Lichess and Chess.com) and publishes a summary.

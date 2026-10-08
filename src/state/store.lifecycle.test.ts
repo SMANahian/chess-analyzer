@@ -10,6 +10,7 @@ import * as repo from '../db/repo';
 import { getDb, useTestDb } from '../db/schema';
 import { setLichessCooldown } from '../sources/http';
 import { FakeLichess, FakePool, lichessHistory, lichessLine, storedGame, type ScoreTable } from '../services/__fixtures__/fakes';
+import { CHANNEL, JOB_LOCK } from '../services/jobs';
 import * as store from './store';
 
 const NOW = Date.UTC(2026, 9, 8, 12);
@@ -231,6 +232,111 @@ describe('another tab holds the job lock', () => {
     await expect(store.importPgn(new Blob([pgn]), { aliases: ['Me'] })).rejects.toThrow(/another tab/i);
     expect(store.otherTabBusy.value).toBe(true);
     await expect(store.refresh()).resolves.toBeUndefined();
+  });
+});
+
+describe('another tab that goes away mid-job', () => {
+  /** Web Locks as in a browser: the other tab holds the job lock until it is closed. */
+  function otherTab(): { close(): void } {
+    let held = true;
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async (_n: string, _o: unknown, cb: (lock: unknown) => Promise<unknown>) => cb(held ? null : {}),
+        query: async () => ({ held: held ? [{ name: JOB_LOCK }] : [] }),
+      },
+    });
+    return {
+      close: () => {
+        held = false;
+      },
+    };
+  }
+
+  it('otherTabBusy is cleared once no tab holds the job lock, although "job-done" never came', async () => {
+    const tab = otherTab();
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      await store.init();
+      expect(store.otherTabBusy.value).toBe(true);
+      // Its job keeps running: still busy after a check.
+      await vi.advanceTimersByTimeAsync(store.OTHER_TAB_POLL_MS);
+      expect(store.otherTabBusy.value).toBe(true);
+      // Meanwhile it stored games; then the tab is closed (or crashes) mid-job: no 'job-done' message.
+      const id = (await repo.ensureSelfProfile({ name: 'hero', accounts: [], aliases: [] }, NOW)).id;
+      await repo.addGames([storedGame(id, 'a', 'e4 e5 Nf3', 'white', NOW)]);
+      tab.close();
+      await vi.advanceTimersByTimeAsync(store.OTHER_TAB_POLL_MS);
+      await vi.waitFor(() => expect(store.otherTabBusy.value).toBe(false));
+      // What it stored is shown.
+      await vi.waitFor(() => expect(store.games.value).toHaveLength(1));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('is re-checked at once when the page becomes visible (timers are throttled in hidden tabs)', async () => {
+    const tab = otherTab();
+    const onVisible: (() => void)[] = [];
+    vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      hidden: false,
+      addEventListener: (type: string, cb: () => void) => type === 'visibilitychange' && onVisible.push(cb),
+      removeEventListener() {},
+    });
+    await store.init();
+    expect(store.otherTabBusy.value).toBe(true);
+    tab.close();
+    for (const cb of onVisible) cb();
+    await vi.waitFor(() => expect(store.otherTabBusy.value).toBe(false));
+  });
+
+  it('without a way to query the lock, only "job-done" clears it', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const tabA = new BroadcastChannel(CHANNEL);
+    try {
+      await store.init();
+      tabA.postMessage({ type: 'job-started', profileId: 'p' });
+      await vi.waitFor(() => expect(store.otherTabBusy.value).toBe(true));
+      await vi.advanceTimersByTimeAsync(3 * store.OTHER_TAB_POLL_MS);
+      expect(store.otherTabBusy.value).toBe(true);
+      tabA.postMessage({ type: 'job-done', profileId: 'p' });
+      await vi.waitFor(() => expect(store.otherTabBusy.value).toBe(false));
+    } finally {
+      tabA.close();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('the job record cannot be written (storage full, database closed)', () => {
+  it('the job still releases the screen wake lock and tells the other tabs it is over', async () => {
+    let held = 0;
+    vi.stubGlobal('document', { visibilityState: 'visible', hidden: false, addEventListener() {}, removeEventListener() {} });
+    vi.stubGlobal('navigator', {
+      wakeLock: {
+        request: async () => {
+          held++;
+          return { release: async () => void held-- };
+        },
+      },
+    });
+    await store.init();
+    const p = await repo.createProfile({ name: 'rival', kind: 'opponent', accounts: [], aliases: [] });
+    const tabB = new BroadcastChannel(CHANNEL);
+    const heard: string[] = [];
+    tabB.onmessage = (e: MessageEvent) => heard.push((e.data as { type: string }).type);
+    const meta = getDb().meta;
+    const put = meta.put.bind(meta);
+    meta.put = ((row: { key: string; value: unknown }, key?: unknown) =>
+      row.key === 'job' ? Promise.reject(new DOMException('The quota has been exceeded.', 'QuotaExceededError')) : put(row, key as never)) as typeof meta.put;
+    try {
+      await expect(store.analyze(p.id)).rejects.toThrow(/quota/);
+      await vi.waitFor(() => expect(heard).toEqual(['job-started', 'job-done']));
+      expect(held).toBe(0);
+      expect(store.busy.value).toBe(false);
+    } finally {
+      tabB.close();
+    }
   });
 });
 

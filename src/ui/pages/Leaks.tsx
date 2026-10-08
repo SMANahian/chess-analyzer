@@ -1,16 +1,19 @@
 // Leaks: the repeated mistakes. Desktop: list (tabs, filters) on the left, the selected leak on the
 // right. Phones: the list, then a detail screen with back / previous / next (and swipe).
-// Keyboard: j/k or ↑/↓ move through the list, ←/→ step through moves, f flips, ? shows help.
+// Keyboard: the list is one Tab stop (↑/↓ move between rows; on wide screens they also select), ←/→
+// step through the moves (board focused, or nothing focused), and — unless turned off in Settings —
+// j/k next/previous leak, f flips, ? shows help.
 import '../styles/features.css';
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import * as store from '../../state/store';
 import type { Color, Mistake } from '../../core/types';
 import { EmptyState } from '../components/EmptyState';
-import { plural, shortDate } from '../components/format';
-import { isShortcut, useSwipe } from '../components/gestures';
+import { formatCount, plural } from '../components/format';
+import { isKeyShortcut, useSwipe } from '../components/gestures';
 import { useAction, useMediaQuery, useNow } from '../components/hooks';
 import { Icon } from '../components/Icon';
+import { shortcutsOn } from '../components/keyboard';
 import { LeakFilters } from '../components/LeakFilters';
 import { LeakListItem } from '../components/LeakListItem';
 import {
@@ -35,6 +38,8 @@ import { NoGames } from './Dashboard';
 import { changeStatus, LeakDetail, type LeakNav } from './LeakDetail';
 
 const WIDE = '(min-width: 960px)';
+/** Rows rendered at first (and added by "Show more"); the selected row is always rendered. */
+export const ROW_PAGE = 50;
 const TAB_LABEL: Readonly<Record<LeakTab, string>> = { active: 'Active', mastered: 'Mastered', ignored: 'Ignored', snoozed: 'Snoozed' };
 
 interface Row {
@@ -47,6 +52,21 @@ interface Row {
 
 const leakHref = (shortId: string | undefined, tab: LeakTab): string => href('leaks', shortId, tab === 'active' ? undefined : { tab });
 const opposite = (c: Color): Color => (c === 'white' ? 'black' : 'white');
+/** Stable (module-level), so memoised rows are not re-rendered for a new handler. */
+const restoreFromList = (m: Mistake): void => void changeStatus(m, 'restore');
+
+const rowElement = (shortId: string): HTMLElement | null =>
+  document.querySelector<HTMLElement>(`.leaks-list [data-short-id="${CSS.escape(shortId)}"]`);
+const detailHeading = (): HTMLElement | null => document.getElementById('ld-title');
+const focusIsIdle = (): boolean => {
+  const a = document.activeElement;
+  return !a || a === document.body || a === document.documentElement;
+};
+
+/** How many rows to render: a page at a time, and always far enough to include the selected row. */
+export function rowsToRender(total: number, limit: number, selectedIndex: number): number {
+  return Math.min(total, Math.max(limit, selectedIndex + 1));
+}
 
 /** `#/leaks?opening=…&color=…` (from the Openings page) sets the filters, then the URL is cleaned. */
 function useQueryFilters(route: Route): void {
@@ -104,9 +124,13 @@ export default function Leaks({ route }: PageProps): JSX.Element {
   useListScrollMemory(!wide && route.id === undefined);
   const [flipped, setFlipped] = useState(false);
   const [help, setHelp] = useState(false);
+  const [limit, setLimit] = useState(ROW_PAGE);
+  /** Phones: the row that holds the list's Tab stop (the last one focused or visited). */
+  const [cursorId, setCursorId] = useState<string | null>(null);
 
   const mistakes = store.mistakes.value;
   const visible = store.visibleMistakes.value;
+  const filters = store.filters.value;
   const rows = useMemo(() => rowsFor(tab, now), [tab, now, mistakes, visible]);
   const counts = useMemo(
     () => ({
@@ -117,6 +141,12 @@ export default function Leaks({ route }: PageProps): JSX.Element {
     }),
     [mistakes, visible, now],
   );
+  // A new filter or tab starts from the top of the list again.
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) firstRender.current = false;
+    else setLimit(ROW_PAGE);
+  }, [filters, tab]);
 
   const selected = route.id ? store.getMistakeByShortId(route.id) : wide ? rows[0]?.m : undefined;
   const index = selected ? rows.findIndex(r => r.m.id === selected.id) : -1;
@@ -124,22 +154,58 @@ export default function Leaks({ route }: PageProps): JSX.Element {
   const go = (row: Row | undefined): void => {
     if (row) navigate(leakHref(row.m.shortId, tab), { replace: wide });
   };
+  const showDetailOnly = !wide && route.id !== undefined;
+  const shown = rowsToRender(rows.length, limit, index);
+  const tabStopId = wide ? (selected?.id ?? rows[0]?.m.id) : rows.some(r => r.m.id === cursorId) ? cursorId : rows[0]?.m.id;
+
+  /** ↑/↓ (and j/k on the list): the next row gets focus; on wide screens it is also selected. */
+  const moveInList = (fromShortId: string | undefined, delta: 1 | -1): void => {
+    const from = fromShortId === undefined ? -1 : rows.findIndex(r => r.m.shortId === fromShortId);
+    const next = from < 0 ? (delta > 0 ? rows[0] : undefined) : rows[from + delta];
+    if (!next) return;
+    const at = rows.indexOf(next);
+    if (at >= shown) setLimit(l => Math.max(l, at + 1));
+    setCursorId(next.m.id);
+    if (wide) go(next);
+    // At once when the row is rendered (fast repeated presses each move one row), else once it is.
+    const focusRow = (): void => {
+      rowElement(next.m.shortId)?.focus({ preventScroll: wide });
+      if (wide) revealRow(next.m.shortId);
+    };
+    if (rowElement(next.m.shortId)) focusRow();
+    else requestAnimationFrame(focusRow);
+  };
 
   // After master / ignore / snooze / restore the leak leaves this tab: move on to its neighbour.
-  const afterStatusChange = (m: Mistake): void => {
+  const afterStatusChange = (m: Mistake, viaKeyboard: boolean): Mistake | undefined => {
     const i = rows.findIndex(r => r.m.id === m.id);
-    const next = rows[i + 1] ?? rows[i - 1];
-    navigate(next && next.m.id !== m.id ? leakHref(next.m.shortId, tab) : leakHref(undefined, tab), { replace: true });
+    const candidate = rows[i + 1] ?? rows[i - 1];
+    const next = candidate && candidate.m.id !== m.id ? candidate.m : undefined;
+    navigate(next ? leakHref(next.shortId, tab) : leakHref(undefined, tab), { replace: true });
+    requestAnimationFrame(() => {
+      // Phones: the next leak opens at the top with its title in view (a replace navigation keeps the scroll).
+      if (!wide) window.scrollTo({ top: 0 });
+      // From the keyboard, focus goes to the toast's Undo; otherwise to the leak now shown.
+      if (!viaKeyboard) detailHeading()?.focus({ preventScroll: true });
+    });
+    return next;
   };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (!isShortcut(e)) return;
-      if (e.key === 'j' || e.key === 'ArrowDown') go(neighbour(1));
-      else if (e.key === 'k' || e.key === 'ArrowUp') go(neighbour(-1));
-      else if (e.key === 'f') setFlipped(x => !x);
+      if (!isKeyShortcut(e, shortcutsOn.value)) return;
+      const target = e.target instanceof Element ? e.target : null;
+      const row = target?.closest<HTMLElement>('.leaks-list [data-short-id]');
+      const listOnly = !wide && !showDetailOnly;
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && row) moveInList(row.dataset.shortId, e.key === 'ArrowDown' ? 1 : -1);
+      else if (e.key === 'j' || e.key === 'k') {
+        const delta = e.key === 'j' ? 1 : -1;
+        // On the phone list, j/k only move the focus: they never open a leak's screen.
+        if (listOnly || row) moveInList(row?.dataset.shortId ?? rows.find(r => r.m.id === tabStopId)?.m.shortId, delta);
+        else go(neighbour(delta));
+      } else if (e.key === 'f') setFlipped(x => !x);
       else if (e.key === '?') setHelp(true);
-      else if (e.key === 'Escape' && !wide && route.id) navigate(leakHref(undefined, tab));
+      else if (e.key === 'Escape' && showDetailOnly) navigate(leakHref(undefined, tab));
       else return;
       e.preventDefault();
     };
@@ -154,17 +220,37 @@ export default function Leaks({ route }: PageProps): JSX.Element {
     return () => cancelAnimationFrame(id);
   }, [selected?.id, wide]);
 
-  const showDetailOnly = !wide && route.id !== undefined;
+  // Phones: opening a leak puts focus on its title (the row that had it is gone); coming back to the
+  // list puts it on the row of the leak just seen.
+  const previousId = useRef<string | undefined>(route.id);
+  useEffect(() => {
+    const before = previousId.current;
+    previousId.current = route.id;
+    if (wide || before === route.id) return;
+    if (route.id !== undefined) {
+      const pane = document.querySelector('.leaks-detail-pane');
+      if (!pane?.contains(document.activeElement)) detailHeading()?.focus({ preventScroll: true });
+      return;
+    }
+    if (before === undefined) return;
+    const seen = store.getMistakeByShortId(before);
+    if (seen) setCursorId(seen.id);
+    requestAnimationFrame(() => {
+      if (focusIsIdle() || document.activeElement === document.getElementById('main')) rowElement(before)?.focus({ preventScroll: true });
+    });
+  }, [route.id, wide]);
+
   const detail = selected ? (
     <LeakDetail
-      key={selected.id}
+      key="detail"
       m={selected}
-      view={viewOfMistake(selected, store.filters.value, now)}
+      view={viewOfMistake(selected, filters, now)}
       tab={tabOf(selected, now)}
       orientation={flipped ? opposite(selected.color) : selected.color}
       onFlip={() => setFlipped(x => !x)}
       now={now}
       nav={showDetailOnly ? mobileNav(index, rows.length, tab, neighbour(-1), neighbour(1)) : undefined}
+      headingLevel={showDetailOnly ? 1 : 2}
       onStatusChange={afterStatusChange}
       onUndo={m => navigate(leakHref(m.shortId, tab), { replace: true })}
     />
@@ -172,6 +258,7 @@ export default function Leaks({ route }: PageProps): JSX.Element {
     <EmptyState
       icon="leaks"
       title="This leak isn’t in your list"
+      headingLevel={showDetailOnly ? 1 : 2}
       actions={
         <a class="btn" href={leakHref(undefined, tab)}>
           See all leaks
@@ -198,7 +285,15 @@ export default function Leaks({ route }: PageProps): JSX.Element {
             />
             <TabPanel id={tab} idPrefix="leaks">
               {tab === 'active' ? <LeakFilters now={now} /> : null}
-              <LeakList rows={rows} tab={tab} selectedId={wide ? selected?.id : undefined} now={now} />
+              <LeakList
+                rows={rows}
+                shown={shown}
+                tab={tab}
+                selectedId={wide ? selected?.id : undefined}
+                tabStopId={tabStopId ?? undefined}
+                now={now}
+                onMore={() => setLimit(l => l + ROW_PAGE)}
+              />
             </TabPanel>
           </aside>
         )}
@@ -216,7 +311,7 @@ export default function Leaks({ route }: PageProps): JSX.Element {
 /** Scrolls the list pane (only) so the row is visible below its sticky tabs. */
 function revealRow(shortId: string): void {
   const pane = document.querySelector<HTMLElement>('.leaks-list-pane');
-  const row = pane?.querySelector<HTMLElement>(`[data-short-id="${shortId}"]`);
+  const row = pane?.querySelector<HTMLElement>(`[data-short-id="${CSS.escape(shortId)}"]`);
   if (!pane || !row) return;
   const top = pane.getBoundingClientRect().top + (pane.querySelector('.tabs')?.getBoundingClientRect().height ?? 0) + 8;
   const bottom = pane.getBoundingClientRect().bottom - 8;
@@ -270,12 +365,30 @@ function SelfProgress(): JSX.Element | null {
   return <ProgressCard showFinished={false} />;
 }
 
-function LeakList({ rows, tab, selectedId, now }: { rows: Row[]; tab: LeakTab; selectedId?: string; now: number }): JSX.Element {
+function LeakList({
+  rows,
+  shown,
+  tab,
+  selectedId,
+  tabStopId,
+  now,
+  onMore,
+}: {
+  rows: Row[];
+  shown: number;
+  tab: LeakTab;
+  selectedId?: string;
+  tabStopId?: string;
+  now: number;
+  onMore(): void;
+}): JSX.Element {
   if (rows.length === 0) return <ListEmpty tab={tab} now={now} />;
+  const status = tab === 'active' ? undefined : tab;
+  const left = rows.length - shown;
   return (
     <>
       <ol class="leaks-list">
-        {rows.map(r => (
+        {rows.slice(0, shown).map(r => (
           <LeakListItem
             key={r.m.id}
             m={r.m}
@@ -285,18 +398,18 @@ function LeakList({ rows, tab, selectedId, now }: { rows: Row[]; tab: LeakTab; s
             depth={r.depth}
             parent={r.parent}
             selected={r.m.id === selectedId}
+            tabbable={r.m.id === tabStopId}
             now={now}
-            status={tab === 'active' ? undefined : <StatusLine m={r.m} tab={tab} />}
-            action={
-              tab === 'active' ? undefined : (
-                <button type="button" class="btn btn-sm btn-ghost" onClick={() => void changeStatus(r.m, 'restore')}>
-                  Restore
-                </button>
-              )
-            }
+            tab={status}
+            onRestore={status ? restoreFromList : undefined}
           />
         ))}
       </ol>
+      {left > 0 ? (
+        <button type="button" class="btn btn-ghost btn-block leaks-more" onClick={onMore}>
+          Show {Math.min(left, ROW_PAGE)} more <span class="faint num">· {formatCount(left)} not shown</span>
+        </button>
+      ) : null}
       {tab === 'active' && store.busy.value ? (
         <p class="small faint leaks-live">
           <Spinner label="" size={14} /> Still analyzing — new leaks appear as they’re found.
@@ -304,12 +417,6 @@ function LeakList({ rows, tab, selectedId, now }: { rows: Row[]; tab: LeakTab; s
       ) : null}
     </>
   );
-}
-
-function StatusLine({ m, tab }: { m: Mistake; tab: Exclude<LeakTab, 'active'> }): JSX.Element {
-  if (tab === 'snoozed') return <span class="badge badge-neutral">Until {shortDate(m.snoozedUntil ?? 0)}</span>;
-  if (tab === 'ignored') return <span class="badge badge-neutral">{m.ignoreReason === 'repertoire' ? 'Your repertoire' : 'Ignored'}</span>;
-  return <span class="badge badge-good">Mastered {shortDate(m.updatedAt)}</span>;
 }
 
 function ListEmpty({ tab, now }: { tab: LeakTab; now: number }): JSX.Element {
@@ -404,10 +511,10 @@ function NothingSelected({ tab }: { tab: LeakTab }): JSX.Element {
 }
 
 const SHORTCUTS: readonly [string[], string][] = [
-  [['j', '↓'], 'Next leak'],
-  [['k', '↑'], 'Previous leak'],
-  [['←', '→'], 'Step through the moves'],
-  [['Home', 'End'], 'Start of the game / end of the best line'],
+  [['↓', '↑'], 'Next / previous leak (in the list)'],
+  [['j', 'k'], 'Next / previous leak'],
+  [['←', '→'], 'Step through the moves (board focused, or nothing focused)'],
+  [['Home', 'End'], 'Start of the game / end of the best line (board focused)'],
   [['f'], 'Flip the board'],
   [['?'], 'This help'],
 ];
@@ -430,6 +537,9 @@ function ShortcutsHelp({ open, onClose }: { open: boolean; onClose(): void }): J
           </div>
         ))}
       </dl>
+      <p class="small muted shortcuts-note">
+        The single-key shortcuts (j, k, f, ?) can be turned off in <a href={href('settings')}>Settings → Appearance</a>.
+      </p>
     </Modal>
   );
 }

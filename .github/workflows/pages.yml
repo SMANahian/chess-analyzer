@@ -1,9 +1,13 @@
 name: Deploy to GitHub Pages
 
 # One-time setup by the repository owner: Settings → Pages → Build and deployment → Source: "GitHub Actions".
-# Only the default branch deploys: the github-pages environment rejects other branches by default.
+# Deploys a push to master only once CI (ci.yml: unit tests, build, e2e) has passed for that commit, or
+# when run by hand. Only the default branch deploys: the github-pages environment rejects other branches
+# by default.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [master]
   workflow_dispatch:
 
@@ -19,12 +23,22 @@ concurrency:
 
 jobs:
   build:
+    # A CI run that passed for a push to master of this repository. (The branches filter alone also
+    # matches pull requests whose head branch is called master, including ones from forks.)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
       wasm: ${{ steps.engine.outputs.wasm }}
     steps:
+      # The commit CI tested (a workflow_run event's own sha is the default branch's latest commit).
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -34,6 +48,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Type-checks, builds and checks dist/ (CSP hashes, licence notices, manifest icons).
       - name: Build
         run: npm run build
 

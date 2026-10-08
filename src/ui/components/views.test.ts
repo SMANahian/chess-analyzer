@@ -3,6 +3,7 @@ import { START_FEN } from '../../core/chess';
 import type { AnalysisProgress, Mistake, Occurrence, ReviewState, StoredGame, SyncProgress } from '../../core/types';
 import { gameBreakdown, nextDue, sinceVisit } from '../pages/Dashboard';
 import { arrowFromUci, replayFrames } from './Board';
+import { evalParts, evalSpoken } from './EvalText';
 import { jobView } from './ProgressCard';
 
 const NOW = 1_800_000_000_000;
@@ -45,7 +46,7 @@ describe('jobView', () => {
   });
 
   it('shows analysis progress by weight, with counts and ETA', () => {
-    const v = jobView(null, analysis({ etaMs: 4 * 60_000 }), NOW);
+    const v = jobView(null, analysis({ etaMs: 4 * 60_000 }), NOW, { selfId: 'p', leaksShown: 3 });
     expect(v?.detail).toBe('41 of 310 positions checked · 3 leaks found so far');
     expect(v?.fraction).toBeCloseTo(0.6);
     expect(v?.eta).toBe('about 4 min');
@@ -106,5 +107,17 @@ describe('board helpers', () => {
     expect(frames[0]).toMatchObject({ fen: START_FEN, turn: 'white', check: false });
     expect(frames[7]).toMatchObject({ lastMove: 'h5f7', turn: 'black', check: true });
     expect(replayFrames('bad fen', ['e2e4'])).toEqual([]);
+  });
+});
+
+describe('EvalText', () => {
+  it('spells out what each number means for screen readers, without the arrow', () => {
+    const parts = evalParts({ from: { cp: 37 }, to: { cp: 310 }, sideToMove: 'white', user: 'black' });
+    expect(evalSpoken(parts)).toBe('You: −0.37 with the best move, −3.10 after this move (clearly worse)');
+    // What is seen: the two numbers and an arrow.
+    expect(parts.filter(p => p.only !== 'sr').map(p => p.text).join('')).toBe('You: −0.37 → −3.10 (clearly worse)');
+  });
+  it('reads a single score as it is shown', () => {
+    expect(evalSpoken(evalParts({ from: { cp: 30 }, sideToMove: 'white', user: 'white', who: 'Them' }))).toBe('Them: +0.30 (about equal)');
   });
 });

@@ -36,14 +36,25 @@ export async function withJobLock<T>(fn: () => Promise<T>): Promise<T | null> {
   return result === HELD_ELSEWHERE ? null : result;
 }
 
-/** Whether some tab (this one included) holds the job lock right now; false when unknown. */
-export async function isJobLockHeld(): Promise<boolean> {
+/**
+ * Whether some tab (this one included) holds the job lock right now; null when that cannot be known
+ * (no Web Locks, or no `query`). A tab that is closed, crashes or is discarded releases its locks, so
+ * "not held" is reliable even when the tab never said its job was done.
+ */
+export async function queryJobLock(): Promise<boolean | null> {
+  const locks = lockManager();
+  if (!locks?.query) return null;
   try {
-    const state = await lockManager()?.query?.();
+    const state = await locks.query();
     return state?.held?.some(l => l.name === JOB_LOCK) ?? false;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Whether some tab (this one included) holds the job lock right now; false when unknown. */
+export async function isJobLockHeld(): Promise<boolean> {
+  return (await queryJobLock()) ?? false;
 }
 
 // ── BroadcastChannel ──────────────────────────────────────────────────────

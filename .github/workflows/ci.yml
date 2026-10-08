@@ -28,13 +28,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
-        run: npm run typecheck
-
       - name: Unit tests
         run: npx vitest run
 
-      - name: Build
+      # Type-checks (tsc), builds and checks dist/ (scripts/check-dist.mjs); the e2e tests below serve
+      # this dist/ instead of building again.
+      - name: Typecheck and build
         run: npm run build
 
       - name: Install Playwright Chromium

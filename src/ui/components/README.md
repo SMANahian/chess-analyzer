@@ -124,7 +124,14 @@ Pure helpers: `gameUrl`, `parseGameKey` in `format.ts`.
 ### Buttons (`buttons.tsx`)
 - `CopyButton`: `text: string | () => string | Promise<string>`, `label?`, `class?`. Shows "Copied".
 - `ConfirmButton`: two-step destructive action. `onConfirm`, children, `confirmLabel?`, `class?`,
-  `disabled?`, `timeoutMs?` (4 s).
+  `disabled?`, `timeoutMs?` (4 s). The confirming click must be a separate click at least
+  `MIN_CONFIRM_MS` (600 ms) after arming: a double-click or a held-down Enter only arms it
+  (`confirmStep`, `blockKeyRepeat`, `isDeliberateClick` are the pure guards).
+
+### `DeleteAllData` (`DeleteAllData.tsx`)
+"Delete all data" button + confirmation dialog (what is lost, Cancel first and focused, "Download a
+backup first", the destructive button last and guarded like `ConfirmButton`). `onDeleted()`, `class?`.
+Used by Settings and by the app's crash-recovery screen; needs no toast host.
 
 ### Forms (`forms.tsx`)
 - `Field`: `label`, `htmlFor`, `hint?`, `error?`, children (the control; give it
@@ -145,9 +152,9 @@ Styles live in `styles/features.css`, imported by those lazily loaded pages.
 - `LeakFilters` (`LeakFilters.tsx`): the Leaks filter bar — search, colour, sort inline; time controls,
   date range, severity, minimum games, opening, rated / borderline / book in a "Filters" sheet. Writes
   `store.setFilters` live. Prop: `now`.
-- `LeakListItem` (`LeakListItem.tsx`): a Leaks row — `m`, `href`, `k`/`n` (view counts), `depth`/`parent`
-  (indented "after 6.Bc5?!"), `selected`, `now`, optional `status` and `action` (Restore). Also exports
-  `OutcomeBadge`.
+- `LeakListItem` (`LeakListItem.tsx`, memoised): a Leaks row — `m`, `href`, `k`/`n` (view counts),
+  `depth`/`parent` (indented "after 6.Bc5?!"), `selected`, `tabbable` (the list's roving Tab stop), `now`,
+  and for the status tabs `tab` + `onRestore` (keep props primitive or stable). Also exports `OutcomeBadge`.
 - `LineView` (`LineView.tsx`): a line of moves ("6…Nxe4 7.Qe2 d5") as buttons — `startFen`, `ucis`,
   `current?`, `onSelect?(i)`, `lead?: 'best' | 'habit'`, `label`, `maxPlies?`. `useLineCursor(path, lines,
   main, contentKey)` steps path → root → line (← / →) and gives the board position to show;
@@ -155,7 +162,10 @@ Styles live in `styles/features.css`, imported by those lazily loaded pages.
 - `ScoreBar` (`ScoreBar.tsx`): a 0..1 score as "46%" with a coloured bar (`compact` = number only).
 - `Skeleton`, `SkeletonRows`, `SkeletonBoard` (`Skeleton.tsx`): loading placeholders with the final size.
 - `gestures.ts`: `useSwipe(handlers, enabled)` (horizontal swipes on phones), `isShortcut(e)` /
-  `isTypingTarget(target)` for single-key shortcuts.
+  `isTypingTarget(target)`, `isKeyShortcut(e, enabled)` (character keys only while the user has
+  shortcuts on), `isPageTarget(target)` (nothing focused).
+- `keyboard.ts`: the "Keyboard shortcuts" setting (`shortcutsOn`, `setShortcutsOn`; per device),
+  `usedKeyboardLast()` and `focusIfIdle(el, scope)` for focus moves made for keyboard users.
 - `leakView.ts` (pure): tabs (`tabOf`, `tabList`), copy (`habitLabel` → '6…Nxe4?', `headlineOf` /
   `headlineText`, `outcomeBadge`, `punishmentOf` / `punishmentText`, `standingText`), `groupByParent`,
   `viewOfMistake` / `scoreSplit` (view numbers for any status), date ranges (`sinceForMonths`,
@@ -171,8 +181,13 @@ Styles live in `styles/features.css`, imported by those lazily loaded pages.
   `formatCountdown`, `moveLabel(fen, uci)`, `sideToMove(fen)`, `evalWords(score)`,
   `scoreFor(score, sideToMove, viewer)`, `colorName`, `speedName`, `platformName`, `gameUrl`,
   `parseGameKey`, `isoDate`, `shortDate`.
-- `hooks.ts`: `useNow(ms)`, `useMediaQuery(q)`, `prefersReducedMotion()`, `toast`, `runAction`,
-  `useAction`, `downloadBlob(blob, name)`, `copyText(text)`.
+- `hooks.ts`: `useNow(ms)`, `useMediaQuery(q)`, `prefersReducedMotion()`, `toast(kind, text, action?,
+  focus?)` (`focus.focusAction` moves focus to the toast's button, `returnFocus` says where it goes
+  back), `runAction`, `useAction`, `debounce(fn, ms)`, `downloadBlob(blob, name)`, `copyText(text)`.
+- `safe.ts`: `safeRead(read, fallback)` and `trainingCountsSafe()` for the app shell (a view that
+  throws must not take the shell down).
+- `memo.ts`: `memo(Component, equal?)` without preact/compat.
+- `format.ts` also has `describePawnDrop(best, played)`: the engine's own pawn drop ('≈5.0 pawns').
 - `errors.ts`: `friendlyError(err)` → `{ kind, title, text, platform?, suggestPgn }` for store errors
   (`SourceError`, `AccountError`, network `TypeError`, aborts).
 - `diagnostics.ts`: boot state (`bootState`, `boot()`) and `collectDiagnostics()` (JSON for bug reports).

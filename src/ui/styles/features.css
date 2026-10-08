@@ -18,11 +18,11 @@
 }
 .badge-good {
   background: var(--good-soft);
-  color: var(--good);
+  color: var(--badge-good-fg, var(--good));
 }
 .badge-warn {
   background: color-mix(in srgb, var(--move-habit) 15%, transparent);
-  color: var(--move-habit);
+  color: var(--badge-warn-fg, var(--move-habit));
 }
 .badge-accent {
   background: var(--accent-soft);
@@ -378,6 +378,13 @@
 .li-item.is-selected .li-row {
   background: var(--accent-soft);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+/* Small text on the tinted selected row: one step brighter than the faint default (contrast ≥ 4.5:1). */
+.li-item.is-selected .li-meta,
+.li-item.is-selected .li-after,
+.li-row:hover .li-meta,
+.li-row:hover .li-after {
+  color: var(--text-muted);
 }
 .li-child {
   margin-left: calc(var(--s5) * var(--depth, 1));
@@ -736,10 +743,24 @@
   text-align: right;
 }
 
-/* Tabs inside the narrow list pane: compact so all four fit. */
+/* Tabs inside the narrow list pane: compact so all four fit (counts of empty tabs are hidden). */
 .leaks-list-pane .tab {
-  padding: 0 10px;
+  gap: 3px;
+  padding: 0 5px;
   font-size: var(--fs-sm);
+}
+.leaks-list-pane .tab-count {
+  min-width: 18px;
+  padding: 1px 4px;
+}
+/* Phones: a tab that does not fit goes to a second row rather than out of view. */
+@media (max-width: 959px) {
+  .leaks-list-pane .tabs {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
 }
 .leaks-list-pane .tabs {
   gap: 0;
@@ -1445,4 +1466,26 @@
   padding-inline: 4px;
   font-size: var(--fs-sm);
   white-space: nowrap;
+}
+
+/* "Show N more" under a long leak list. */
+.leaks-more {
+  margin-top: var(--s2);
+  font-size: var(--fs-sm);
+}
+.shortcuts-note {
+  margin-top: var(--s4);
+}
+/* Keyboard hints are noise on touch screens. */
+.kbd-hint {
+  margin-top: var(--s2);
+}
+@media (pointer: coarse) {
+  .kbd-hint {
+    display: none;
+  }
+}
+/* The leak board takes focus for ←/→ stepping. */
+.ld-board-col .board:focus-visible {
+  outline-offset: 3px;
 }

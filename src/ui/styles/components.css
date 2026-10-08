@@ -262,6 +262,25 @@
   font-size: var(--fs-xs);
   text-align: center;
 }
+/* A tablist that still scrolls (very narrow screens) fades out at the edge with more tabs. */
+.tabs.has-more-end {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.tabs.has-more-start {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+.tabs.has-more-start.has-more-end {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+@media (max-width: 380px) {
+  .tab {
+    gap: 4px;
+    padding: 0 var(--s2);
+  }
+}
 .tab-panel:focus-visible {
   outline-offset: 4px;
 }
@@ -380,7 +399,7 @@
   width: min(560px, calc(100vw - 2 * var(--gutter)));
   pointer-events: none;
 }
-@media (min-width: 768px) {
+@media (min-width: 800px) {
   .toast-region {
     bottom: var(--s5);
   }
@@ -985,4 +1004,27 @@
   font-size: var(--fs-xs);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* ── Delete all data (dialog) and the crash-recovery screen ─────────── */
+.delete-all-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-left: 1.25em;
+}
+.recovery-steps {
+  display: grid;
+  gap: var(--s2);
+  margin: 0;
+  padding-left: 1.25em;
+}
+.recovery-actions {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+.recovery pre {
+  overflow-x: auto;
+  white-space: pre-wrap;
 }

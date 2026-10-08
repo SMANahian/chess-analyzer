@@ -15,7 +15,7 @@ straight from Lichess and Chess.com, analysed by Stockfish on your own device, a
 1. **Enter your username** (Lichess, Chess.com or both), or upload a PGN file. The app fetches your
    newest 300 games per account, then keeps going back to 1,000 (adjustable).
 2. **Stockfish checks the positions you reach again and again**: every position from the first 10
-   moves that you reached in at least two games, with every move you ever played there.
+   moves where you played the same move in at least two games, with every move you ever played there.
 3. **Drill your leaks** with spaced repetition. A leak is a move you played in the same position in
    two or more games that gives away at least 5 % winning chances. You see each position again just
    before you would forget it, until you stop playing the bad move in real games.
@@ -115,7 +115,7 @@ npm install            # also builds public/data/openings.json from data/opening
 npm run dev            # dev server at http://localhost:5173
 npm test               # unit tests (Vitest), including the real engine running in Node
 npm run typecheck
-npm run build          # static site in dist/
+npm run build          # static site in dist/, checked by scripts/check-dist.mjs
 ```
 
 End-to-end tests run the production build in Chromium with the real engine. Lichess and Chess.com
@@ -141,14 +141,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for code layout and conventions.
 
 ## Deployment
 
-`.github/workflows/pages.yml` builds the app and deploys `dist/` to GitHub Pages on every push to
-`master` (or when run by hand). The repository owner has to do **one-time setup**: go to
-**Settings → Pages → Build and deployment → Source** and choose **GitHub Actions**. After each
+`.github/workflows/pages.yml` builds the app and deploys `dist/` to GitHub Pages after each push to
+`master` once CI (unit tests, build and end-to-end tests) has passed for that commit, or when run by
+hand, so a commit that fails CI is never published. The repository owner has to do **one-time
+setup**: go to **Settings → Pages → Build and deployment → Source** and choose **GitHub Actions**. After each
 deployment, the workflow checks that the live site serves `index.html` and that the engine's `.wasm`
 file has the content type `application/wasm`. Browsers refuse to run the engine with any other type,
 and they fail silently when that happens.
 
-The build uses relative URLs, so `dist/` also works from any other static host or sub-path.
+The build uses relative URLs, so `dist/` also works from any other static host or sub-path. Because
+GitHub Pages cannot send HTTP headers, `index.html` carries the Content-Security-Policy as a `<meta>`
+tag (generated at build time, with the hash of its inline script): scripts only from the site itself,
+network requests only to the site, Lichess and the Chess.com API.
 
 ## Live smoke test
 
@@ -195,7 +199,7 @@ public/
   engine/     vendored Stockfish 19 lite WASM (GPL-3.0)
   icon*.svg/png
 data/openings/  lichess-org/chess-openings TSVs (CC0); built into public/data/openings.json
-scripts/      openings build, engine update, icon rendering, engine benchmark (scripts/bench)
+scripts/      openings build, build plugins (CSP, licences) and dist check, engine update, icons, benchmark
 e2e/          Playwright tests with mocked APIs; e2e/live/ is the live smoke test
 docs/         ARCHITECTURE.md, CONTRACTS.md, ENGINE.md, legacy-v2-profile.md
 ```
@@ -211,7 +215,9 @@ and the module signatures in [docs/CONTRACTS.md](docs/CONTRACTS.md).
   GPL-compatible, and this repository is the complete corresponding source.
 - Opening names come from [lichess-org/chess-openings](https://github.com/lichess-org/chess-openings)
   (**CC0**).
-- Full list of components and licences: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- Full list of components and licences: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The
+  published app ships the licence texts of everything it bundles in `THIRD-PARTY-LICENSES.md`
+  (next to `index.html`, generated at build time).
 
 Thanks to the Stockfish developers, [stockfish.js](https://github.com/nmrugg/stockfish.js), and the
 Lichess team for chessops, chessground, the openings dataset, the win-% model and an open API.

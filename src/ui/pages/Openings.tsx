@@ -7,10 +7,9 @@ import * as store from '../../state/store';
 import { applyFilters, openingsSummary } from '../../core/filters';
 import { loadOpeningBook, type OpeningBook } from '../../core/openings';
 import type { Color, Mistake, ViewMistake } from '../../core/types';
-import { describeLoss } from '../../core/winrate';
 import { EmptyState } from '../components/EmptyState';
 import { messageOf } from '../components/errors';
-import { colorName, formatCount, formatPercent, plural } from '../components/format';
+import { colorName, describePawnDrop, formatCount, formatPercent, plural } from '../components/format';
 import { useNow } from '../components/hooks';
 import { Icon } from '../components/Icon';
 import { groupFamilies, habitLabel, inOpening, openingFamily, viewOfMistake } from '../components/leakView';
@@ -299,7 +298,7 @@ function BookItem({ m, view }: { m: Mistake; view: ViewMistake }): JSX.Element {
           </span>
         </span>
         <span class="small muted">
-          {m.openingName ?? 'Unnamed line'} · as {colorName(m.color)} · costs about {Math.round(m.winLoss)}% ({describeLoss(m.winLoss)})
+          {m.openingName ?? 'Unnamed line'} · as {colorName(m.color)} · costs about {Math.round(m.winLoss)}% ({describePawnDrop(m.scoreBest, m.scorePlayed)})
         </span>
       </span>
       <button type="button" class="btn btn-sm" onClick={() => void changeStatus(m, 'repertoire')}>

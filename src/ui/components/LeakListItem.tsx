@@ -1,11 +1,14 @@
 // One row of the Leaks list: severity, the habit move ('6…Nxe4?'), "k of n games", opening, when it was
 // last played and what happened then. Rows that only arise after an earlier mistake are indented under
 // it ("after 6.Bc5?!"). Rows in the Mastered/Ignored/Snoozed tabs carry their status and a Restore button.
-import type { ComponentChildren, JSX } from 'preact';
+// Memoised: every prop is a primitive or a stable object, so changing a filter re-renders only the rows
+// that changed.
+import type { JSX } from 'preact';
 import type { Mistake } from '../../core/types';
 import { colorName, relativeTime } from './format';
 import { Icon } from './Icon';
-import { habitLabel, outcomeBadge, type Badge } from './leakView';
+import { habitLabel, outcomeBadge, statusBadge, type Badge, type LeakTab } from './leakView';
+import { memo } from './memo';
 import { SeverityPill } from './SeverityPill';
 
 export interface LeakListItemProps {
@@ -17,11 +20,13 @@ export interface LeakListItemProps {
   depth?: number;
   parent?: Mistake;
   selected?: boolean;
+  /** The row in the Tab order (the list uses a roving tabindex: ↑/↓ move between rows). */
+  tabbable?: boolean;
   now: number;
-  /** Replaces the outcome/last-played line (status rows). */
-  status?: ComponentChildren;
-  /** A button shown at the end of the row (e.g. Restore). */
-  action?: ComponentChildren;
+  /** A status tab (Mastered/Ignored/Snoozed): shows the status instead of the outcome, and a Restore button. */
+  tab?: Exclude<LeakTab, 'active'>;
+  /** Restore button handler (status tabs); keep it a stable function. */
+  onRestore?(m: Mistake): void;
 }
 
 export function OutcomeBadge({ badge }: { badge: Badge | null }): JSX.Element | null {
@@ -29,10 +34,10 @@ export function OutcomeBadge({ badge }: { badge: Badge | null }): JSX.Element | 
   return <span class={`badge badge-${badge.tone}`}>{badge.text}</span>;
 }
 
-export function LeakListItem({ m, href, k, n, depth = 0, parent, selected, now, status, action }: LeakListItemProps): JSX.Element {
+function LeakListItemView({ m, href, k, n, depth = 0, parent, selected, tabbable = true, now, tab, onRestore }: LeakListItemProps): JSX.Element {
   return (
     <li class={`li-item${depth > 0 ? ' li-child' : ''}${selected ? ' is-selected' : ''}`} style={depth > 1 ? { '--depth': depth } : undefined}>
-      <a class="li-row" href={href} aria-current={selected ? 'true' : undefined} data-short-id={m.shortId}>
+      <a class="li-row" href={href} aria-current={selected ? 'true' : undefined} data-short-id={m.shortId} tabIndex={tabbable ? 0 : -1}>
         <SeverityPill severity={m.severity} kind={m.kind} confidence={m.confidence} compact />
         <span class="li-main">
           {parent ? (
@@ -51,7 +56,9 @@ export function LeakListItem({ m, href, k, n, depth = 0, parent, selected, now, 
             {m.openingName ?? 'Unnamed line'} · {colorName(m.color)}
           </span>
           <span class="li-meta">
-            {status ?? (
+            {tab ? (
+              <OutcomeBadge badge={statusBadge(m, tab)} />
+            ) : (
               <>
                 <OutcomeBadge badge={outcomeBadge(m)} />
                 <span class="li-when">{relativeTime(m.lastPlayedAt, now)}</span>
@@ -60,7 +67,15 @@ export function LeakListItem({ m, href, k, n, depth = 0, parent, selected, now, 
           </span>
         </span>
       </a>
-      {action ? <span class="li-action">{action}</span> : null}
+      {tab && onRestore ? (
+        <span class="li-action">
+          <button type="button" class="btn btn-sm btn-ghost" onClick={() => onRestore(m)}>
+            Restore
+          </button>
+        </span>
+      ) : null}
     </li>
   );
 }
+
+export const LeakListItem = memo(LeakListItemView);

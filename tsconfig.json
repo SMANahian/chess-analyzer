@@ -16,7 +16,8 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "types": ["vite/client", "vite-plugin-pwa/client"]
   },
-  "include": ["src", "e2e", "scripts/build-demo.ts", "scripts/gen-fixtures.d.mts", "vite.config.ts", "playwright.config.ts", "playwright.live.config.ts"]
+  "include": ["src", "e2e", "scripts/build-demo.ts", "scripts/gen-fixtures.d.mts", "scripts/vite-plugins.ts", "scripts/vite-plugins.test.ts", "vite.config.ts", "playwright.config.ts", "playwright.live.config.ts"]
 }

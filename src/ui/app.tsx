@@ -6,17 +6,24 @@ import { Component, type ComponentChildren, type ComponentType, type JSX } from 
 import { useEffect, useRef, useState } from 'preact/hooks';
 import * as store from '../state/store';
 import { CopyButton } from './components/buttons';
+import { DeleteAllData } from './components/DeleteAllData';
 import { bootError, bootState, collectDiagnostics, errorText } from './components/diagnostics';
 import { EmptyState } from './components/EmptyState';
+import { friendlyError } from './components/errors';
+import { isoDate } from './components/format';
+import { downloadBlob } from './components/hooks';
 import { Icon, type IconName } from './components/Icon';
+import { habitLabel } from './components/leakView';
 import { Banner, NoticeHost, ToastView } from './components/Notice';
-import { JobStatusPill } from './components/ProgressCard';
+import { JobAnnouncer, JobStatusPill } from './components/ProgressCard';
 import { Sheet } from './components/Modal';
+import { safeRead, trainingCountsSafe } from './components/safe';
 import { Spinner } from './components/Spinner';
 import About from './pages/About';
 import Dashboard from './pages/Dashboard';
 import Onboarding from './pages/Onboarding';
 import Settings from './pages/Settings';
+import { pageTitle } from './pageTitle';
 import { href, route, type PageProps, type Route, type RouteName } from './router';
 import { applyTheme } from './theme';
 
@@ -110,6 +117,7 @@ function NotFound(): JSX.Element {
     <EmptyState
       icon="alert"
       title="Page not found"
+      headingLevel={1}
       actions={
         <a class="btn" href={href('home')}>
           Go to Home
@@ -236,7 +244,8 @@ class PageBoundary extends Component<{ children: ComponentChildren; resetKey: st
           </>
         }
       >
-        Your data is safe. Reloading usually fixes it; if not, please report it with the diagnostics.
+        Your data is safe. Reloading usually fixes it; if not, please report it with the diagnostics. If it keeps happening,{' '}
+        <a href={href('settings')}>Settings</a> lets you download a backup or start again.
       </EmptyState>
     );
   }
@@ -271,8 +280,18 @@ function Brand(): JSX.Element {
   );
 }
 
+/** The Train tab's badge: every card training offers now (due reviews and today's new positions). */
+function TrainBadge(): JSX.Element | null {
+  const total = trainingCountsSafe().total;
+  if (total <= 0) return null;
+  return (
+    <span class="nav-badge" aria-label={`${total} to train`}>
+      {total > 99 ? '99+' : total}
+    </span>
+  );
+}
+
 function Header({ r, minimal }: { r: Route; minimal: boolean }): JSX.Element {
-  const due = store.dueCount.value;
   return (
     <header class="app-header">
       <div class="app-header-inner">
@@ -292,11 +311,7 @@ function Header({ r, minimal }: { r: Route; minimal: boolean }): JSX.Element {
               {PRIMARY_NAV.map(item => (
                 <a key={item.name} class="nav-link" href={href(item.name)} aria-current={current(r, item.name)}>
                   {item.label}
-                  {item.name === 'train' && due > 0 ? (
-                    <span class="nav-badge" aria-label={`${due} due`}>
-                      {due > 99 ? '99+' : due}
-                    </span>
-                  ) : null}
+                  {item.name === 'train' ? <TrainBadge /> : null}
                 </a>
               ))}
               <a class="nav-link" href={href('scout')} aria-current={current(r, 'scout')}>
@@ -324,7 +339,6 @@ function Header({ r, minimal }: { r: Route; minimal: boolean }): JSX.Element {
 
 function TabBar({ r }: { r: Route }): JSX.Element {
   const [moreOpen, setMoreOpen] = useState(false);
-  const due = store.dueCount.value;
   const inMore = MORE_NAV.some(i => i.name === r.name);
   useEffect(() => setMoreOpen(false), [r.path]);
   return (
@@ -334,11 +348,7 @@ function TabBar({ r }: { r: Route }): JSX.Element {
           <a key={item.name} class="tab-item" href={href(item.name)} aria-current={current(r, item.name)}>
             <Icon name={item.icon} />
             <span>{item.label}</span>
-            {item.name === 'train' && due > 0 ? (
-              <span class="nav-badge" aria-label={`${due} due`}>
-                {due > 99 ? '99+' : due}
-              </span>
-            ) : null}
+            {item.name === 'train' ? <TrainBadge /> : null}
           </a>
         ))}
         <button
@@ -398,24 +408,140 @@ function UpdatePrompt(): JSX.Element | null {
   );
 }
 
+/**
+ * Whether a route change moves focus to <main> (so screen readers announce the new page). Moving
+ * between leaks inside the Leaks page is not a page change: that page manages focus itself (the list
+ * row keeps it, or the new leak's heading gets it).
+ */
+export function focusesMain(prev: Route, next: Route): boolean {
+  if (prev.path === next.path) return false;
+  return !(prev.name === 'leaks' && next.name === 'leaks');
+}
+
 /** Moves focus to <main> on page changes so screen readers announce the new page. */
-function useFocusOnNavigate(path: string): { current: HTMLElement | null } {
+function useFocusOnNavigate(r: Route): { current: HTMLElement | null } {
   const main = useRef<HTMLElement>(null);
-  const first = useRef(true);
+  const previous = useRef<Route | null>(null);
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
-    main.current?.focus({ preventScroll: true });
-  }, [path]);
+    const prev = previous.current;
+    previous.current = r;
+    if (prev && focusesMain(prev, r)) main.current?.focus({ preventScroll: true });
+  }, [r.path]);
   return main;
 }
 
+/** document.title follows the route (and the leak or scouted player shown). */
+function useDocumentTitle(): void {
+  useSignalEffect(() => {
+    const r = route.value;
+    const hasProfile = !!store.selfProfile.value;
+    const leak = r.name === 'leaks' && r.id ? safeRead(() => store.getMistakeByShortId(r.id!), undefined) : undefined;
+    const scout = r.name === 'scout' && r.id ? store.profiles.value.find(p => p.id === r.id)?.name : undefined;
+    document.title = pageTitle(r, { hasProfile, ...(leak ? { leak: habitLabel(leak) } : {}), ...(scout ? { scout } : {}) });
+  });
+}
+
+/**
+ * The whole app, behind a last-resort boundary: if the shell itself cannot render (a stored row that
+ * breaks every view, a bug), a recovery screen still offers a backup and a fresh start.
+ */
 export function App(): JSX.Element {
+  return (
+    <AppBoundary>
+      <Shell />
+    </AppBoundary>
+  );
+}
+
+class AppBoundary extends Component<{ children: ComponentChildren }, BoundaryState> {
+  override state: BoundaryState = { error: null };
+  static override getDerivedStateFromError(error: unknown): BoundaryState {
+    return { error };
+  }
+  override componentDidCatch(error: unknown): void {
+    console.error('App crashed', error);
+  }
+  override render(): ComponentChildren {
+    return this.state.error ? <RecoveryScreen error={this.state.error} /> : this.props.children;
+  }
+}
+
+/** Shown when the app shell crashed. Uses nothing from the training views (they may be what failed). */
+export function RecoveryScreen({ error }: { error: unknown }): JSX.Element {
+  return (
+    <div class="app" data-shell="minimal">
+      <main id="main" class="app-main recovery" tabIndex={-1}>
+        <div class="page page-narrow">
+          <div class="page-head">
+            <div>
+              <h1>Chess Analyzer ran into a problem</h1>
+              <p class="page-sub">Something in the data stored in this browser stopped the app from showing. Nothing has been deleted.</p>
+            </div>
+          </div>
+          <section class="card stack" aria-labelledby="recovery-steps">
+            <h2 id="recovery-steps">What you can do</h2>
+            <ol class="recovery-steps">
+              <li>Reload the page. That fixes most one-off problems.</li>
+              <li>If this screen comes back, download a backup: it keeps your training history and helps with a bug report.</li>
+              <li>
+                Then delete all data and start again (a backup made after the problem started may bring it back when restored).
+              </li>
+            </ol>
+            <div class="row recovery-actions">
+              <ReloadButton />
+              <BackupButton />
+              <DeleteAllData onDeleted={() => location.reload()} />
+            </div>
+            <p class="small muted">
+              Please report the problem on{' '}
+              <a href="https://github.com/SMANahian/chess-analyzer/issues" target="_blank" rel="noopener noreferrer">
+                GitHub
+              </a>{' '}
+              with the diagnostics (they contain no games). <CopyButton text={() => collectDiagnostics(error)} label="Copy diagnostics" />
+            </p>
+            <details class="small">
+              <summary class="muted">Technical details</summary>
+              <pre>{errorText(error)}</pre>
+            </details>
+          </section>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+/** "Download backup" with its outcome shown in place (the recovery screen has no toasts). */
+function BackupButton(): JSX.Element {
+  const [state, setState] = useState<{ busy: boolean; text?: string; error?: boolean }>({ busy: false });
+  const run = async (): Promise<void> => {
+    setState({ busy: true });
+    try {
+      const blob = await store.exportData();
+      downloadBlob(blob, `chess-analyzer-backup-${isoDate(Date.now())}.json`);
+      setState({ busy: false, text: 'Backup downloaded.' });
+    } catch (err) {
+      setState({ busy: false, text: `The backup couldn’t be made: ${friendlyError(err).text}`, error: true });
+    }
+  };
+  return (
+    <>
+      <button type="button" class="btn" disabled={state.busy} onClick={() => void run()}>
+        <Icon name="download" size={18} /> Download backup
+      </button>
+      {state.text ? (
+        <span class={state.error ? 'field-error' : 'small muted'} role={state.error ? 'alert' : 'status'}>
+          {state.text}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+function Shell(): JSX.Element {
   const r = route.value;
   const minimal = !store.selfProfile.value;
-  const main = useFocusOnNavigate(r.path);
+  const main = useFocusOnNavigate(r);
+  useDocumentTitle();
 
   // Settings own the theme once loaded (before that, the pre-paint choice from localStorage stands).
   useSignalEffect(() => {
@@ -439,6 +565,7 @@ export function App(): JSX.Element {
       <NoticeHost>
         <UpdatePrompt />
       </NoticeHost>
+      <JobAnnouncer />
     </div>
   );
 }

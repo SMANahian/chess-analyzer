@@ -1,6 +1,6 @@
 // Type a move instead of dragging: SAN ('Nf3', '0-0', 'e8=N') or UCI, with the legal moves as suggestions.
 // Enter submits standard UCI. The keyboard / screen-reader way to play on the Board.
-import type { JSX } from 'preact';
+import type { JSX, Ref } from 'preact';
 import { useId, useMemo, useState } from 'preact/hooks';
 import { legalMoves, parseTypedMove } from './moves';
 
@@ -9,21 +9,31 @@ export interface MoveInputProps {
   fen: string;
   onSubmit(uci: string): void;
   disabled?: boolean;
+  /**
+   * Not accepting a move right now (e.g. while the last one is checked), but keeps focus: the field
+   * becomes read-only instead of disabled, so keyboard users don't lose their place.
+   */
+  readOnly?: boolean;
+  /** A move is being checked (aria-busy). */
+  busy?: boolean;
   /** Visible label, default 'Type your move'. */
   label?: string;
   placeholder?: string;
   /** Hide the visible label (keeps it for screen readers). */
   hideLabel?: boolean;
+  inputRef?: Ref<HTMLInputElement>;
 }
 
-export function MoveInput({ fen, onSubmit, disabled, label = 'Type your move', placeholder = 'e.g. Nf3', hideLabel }: MoveInputProps): JSX.Element {
+export function MoveInput({ fen, onSubmit, disabled, readOnly, busy, label = 'Type your move', placeholder = 'e.g. Nf3', hideLabel, inputRef }: MoveInputProps): JSX.Element {
   const id = useId();
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const moves = useMemo(() => legalMoves(fen), [fen]);
+  const inactive = disabled || readOnly;
 
   const submit = (e: Event): void => {
     e.preventDefault();
+    if (inactive) return;
     const value = text.trim();
     if (!value) return;
     const uci = parseTypedMove(fen, value);
@@ -44,6 +54,7 @@ export function MoveInput({ fen, onSubmit, disabled, label = 'Type your move', p
       <div class="move-input-row">
         <input
           id={id}
+          ref={inputRef}
           class="input"
           type="text"
           inputMode="text"
@@ -55,6 +66,8 @@ export function MoveInput({ fen, onSubmit, disabled, label = 'Type your move', p
           placeholder={placeholder}
           value={text}
           disabled={disabled}
+          readOnly={readOnly}
+          aria-busy={busy ? 'true' : undefined}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? `${id}-error` : undefined}
           onInput={e => {
@@ -62,7 +75,7 @@ export function MoveInput({ fen, onSubmit, disabled, label = 'Type your move', p
             if (error) setError(null);
           }}
         />
-        <button type="submit" class="btn" disabled={disabled || !text.trim()}>
+        <button type="submit" class="btn" disabled={inactive || !text.trim()}>
           Play
         </button>
       </div>

@@ -34,6 +34,9 @@
   --danger: #f2766c;
   --danger-soft: rgb(242 118 108 / 0.14);
   --danger-strong: #c8382e;
+  /* Small badge text on its own tint (and on the selected list row): AA at 12px. */
+  --badge-good-fg: #72d89d;
+  --badge-warn-fg: #f39a26;
 
   /* Severities (Okabe–Ito based, colour-blind safe; always paired with ?! ? ?? and a word) */
   --sev-inaccuracy: #62bdf0;
@@ -119,6 +122,8 @@
   --danger: #b42b23;
   --danger-soft: rgb(180 43 35 / 0.08);
   --danger-strong: #b42b23;
+  --badge-good-fg: #17633a;
+  --badge-warn-fg: #7f4000;
 
   --sev-inaccuracy: #0b6a9e;
   --sev-mistake: #935600;

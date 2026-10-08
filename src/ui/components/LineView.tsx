@@ -1,7 +1,7 @@
 // A line of moves as a chess player reads it ("6…Nxe4 7.Qe2 d5"), each move a button that shows its
 // position on the board. useLineCursor steps through "how you got here" → the position → a line from it.
 import type { JSX } from 'preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useMemo, useState } from 'preact/hooks';
 import { START_FEN } from '../../core/chess';
 import { lineMoves, type LineMove } from './leakView';
 
@@ -99,8 +99,15 @@ export interface LineCursor {
  * the path or lines change (e.g. the mistake id): it resets the cursor and the memoised frames.
  */
 export function useLineCursor(path: readonly string[], lines: Readonly<Record<string, LineSource>>, main: string, contentKey: string): LineCursor {
-  const [cursor, setCursor] = useState<Cursor>(null);
-  useEffect(() => setCursor(null), [contentKey]);
+  // The cursor belongs to one content key: a new key starts at the root in the same render (the page
+  // keeps the board mounted from one leak to the next, so no stale position may show in between).
+  const [state, setState] = useState<{ key: string; cursor: Cursor }>({ key: contentKey, cursor: null });
+  const cursor = state.key === contentKey ? state.cursor : null;
+  const setCursor = (next: Cursor | ((c: Cursor) => Cursor)): void =>
+    setState(s => {
+      const current = s.key === contentKey ? s.cursor : null;
+      return { key: contentKey, cursor: typeof next === 'function' ? next(current) : next };
+    });
 
   const frames = useMemo(() => {
     const out: Record<string, LineMove[]> = { path: lineMoves(START_FEN, path) };

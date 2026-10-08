@@ -37,10 +37,18 @@ import { SourceError, abortError, isAbortError } from '../sources/http';
 import { lichessUser } from '../sources/lichess';
 import { scanPgnFileNames } from '../sources/pgnFile';
 import { analyzeProfile, presetDepths } from '../services/analysis';
-import { broadcastJob, holdWakeLock, isJobLockHeld, onJobBroadcast, requestPersistentStorage, withJobLock } from '../services/jobs';
+import { broadcastJob, holdWakeLock, isJobLockHeld, onJobBroadcast, queryJobLock, requestPersistentStorage, withJobLock } from '../services/jobs';
 import type { PoolLike } from '../services/scheduler';
 import { FIRST_RUN_GAMES, importPgnIntoProfile, syncProfile, syncStateKey, type SyncError } from '../services/sync';
-import { buildSession, evaluateTrainingMove, judgeMove, judgeRefutationMove, recordGrade } from '../services/training';
+import {
+  buildSession,
+  evaluateTrainingMove,
+  judgeMove,
+  judgeRefutationMove,
+  recordGrade,
+  sessionCounts,
+  type SessionCounts,
+} from '../services/training';
 
 export type Notice = {
   kind: 'info' | 'error' | 'success';
@@ -56,6 +64,16 @@ const FILTERS_KEY = 'ca:filters';
 const CLOCK_TICK_MS = 60_000;
 const DAY_MS = 86_400_000;
 const MAX_LOGGED_ERRORS = 10;
+/**
+ * While another tab is said to run a job, this tab checks the job lock this often: a tab that is
+ * closed or crashes mid-job never says it is done, but the browser releases its lock.
+ */
+export const OTHER_TAB_POLL_MS = 5_000;
+/**
+ * During an analysis, the mistakes found reach the `mistakes` signal at most this often (each update
+ * re-filters every mistake and re-renders every view of them); the database is written more often.
+ */
+export const MISTAKES_MERGE_MS = 1_000;
 
 // ── Signals ───────────────────────────────────────────────────────────────
 
@@ -97,15 +115,19 @@ export const visibleMistakes: ReadonlySignal<ViewMistake[]> = computed(() => {
   return [...list].sort((a, b) => due(a) - due(b));
 });
 
-/** Cards due now (self profile, default filters): due reviews plus today's remaining new cards. */
-export const dueCount: ReadonlySignal<number> = computed(
-  () =>
-    buildSession(mistakes.value, [...reviews.value.values()], clock.value, {
-      size: Number.MAX_SAFE_INTEGER,
-      newToday: newToday.value,
-      newPerDay: settings.value.newPerDay,
-    }).length,
+export type TrainingCounts = SessionCounts;
+
+/**
+ * What training offers now (self profile, default filters), in one filter pass: reviews due
+ * (`dueReviews`), new positions still allowed today (`newAvailable`), and their sum (`total`, the
+ * cards a session without a size limit would hold).
+ */
+export const trainingCounts: ReadonlySignal<TrainingCounts> = computed(() =>
+  sessionCounts(mistakes.value, reviews.value, clock.value, { newToday: newToday.value, newPerDay: settings.value.newPerDay }),
 );
+
+/** trainingCounts.total: due reviews plus today's remaining new cards (not only reviews). */
+export const dueCount: ReadonlySignal<number> = computed(() => trainingCounts.value.total);
 
 // ── Dependencies (injectable for tests) ───────────────────────────────────
 
@@ -335,9 +357,12 @@ function enqueue(kind: string, profileId: string, work: (signal: AbortSignal) =>
 async function runLocked(profileId: string, work: () => Promise<void>): Promise<void> {
   otherTabBusy.value = false;
   broadcastJob({ type: 'job-started', profileId });
-  const releaseWakeLock = await holdWakeLock();
-  await repo.setMeta('job', { profileId, startedAt: now() });
+  // Everything after 'job-started' is inside the try: a failing job-record write (storage full, the
+  // database closed) must still release the wake lock and tell the other tabs the job is over.
+  let releaseWakeLock = (): void => undefined;
   try {
+    releaseWakeLock = await holdWakeLock();
+    await repo.setMeta('job', { profileId, startedAt: now() });
     await work();
   } finally {
     releaseWakeLock();
@@ -354,18 +379,19 @@ export function cancelJobs(): void {
 }
 
 /**
- * Cancels the profile's jobs and waits until the running one has settled, so none of its last writes
- * (a stored chunk, buffered mistakes) can land after the caller deletes the profile's rows. Queued jobs
- * only need the abort: they stop before writing anything.
+ * Cancels the profile's jobs (those of the given kind only, e.g. 'refresh') and waits until the running
+ * one has settled, so none of its last writes (a stored chunk, buffered mistakes) can land after the
+ * caller deletes the profile's rows. Queued jobs only need the abort: they stop before writing anything.
  */
-async function stopJobsOf(profileId: string): Promise<void> {
+async function stopJobsOf(profileId: string, kind?: string): Promise<void> {
+  const matches = (job: QueuedJob): boolean => job.profileId === profileId && (kind === undefined || job.key === `${kind}:${profileId}`);
   for (const [key, job] of jobs) {
-    if (job.profileId !== profileId) continue;
+    if (!matches(job)) continue;
     job.controller.abort();
     // Forgotten, so the same job requested again (e.g. a refresh for new accounts) really runs.
     jobs.delete(key);
   }
-  const running = currentJob?.profileId === profileId ? currentJob : null;
+  const running = currentJob && matches(currentJob) ? currentJob : null;
   running?.controller.abort();
   if (resumeOnVisible === profileId) resumeOnVisible = null;
   await running?.promise.catch(() => undefined);
@@ -373,10 +399,13 @@ async function stopJobsOf(profileId: string): Promise<void> {
 
 // ── Jobs ──────────────────────────────────────────────────────────────────
 
-/** Settings that change analysis results; a re-analysis without new games is needed when they change. */
-function analysisKey(): string {
-  const { triage, confirm } = presetDepths(settings.value);
-  return `${ENGINE_ID}|${settings.value.openingPlies}|${triage}|${confirm}`;
+/**
+ * The settings that change analysis results, as a key; a re-analysis without new games is needed when
+ * the current settings' key differs from the key of the settings the last complete run used.
+ */
+function analysisKeyOf(s: Pick<Settings, 'openingPlies' | 'preset' | 'depthOverride'>): string {
+  const { triage, confirm } = presetDepths(s);
+  return `${ENGINE_ID}|${s.openingPlies}|${triage}|${confirm}`;
 }
 
 /**
@@ -418,35 +447,72 @@ async function runSync(profileId: string, limit: number, signal: AbortSignal, pe
   return { added: result.added, allFailed: accounts > 0 && result.errors.length >= accounts };
 }
 
-function mergeIntoMistakes(ms: readonly Mistake[]): void {
+function mergeIntoMistakes(ms: Iterable<Mistake>): void {
   const byId = new Map(mistakes.value.map(m => [m.id, m]));
   for (const m of ms) byId.set(m.id, m);
   mistakes.value = [...byId.values()];
 }
 
+/**
+ * Mistakes streamed by a running analysis, merged into the signal at most once per MISTAKES_MERGE_MS:
+ * the first batch at once, later ones collected and merged together when the interval has passed
+ * (every merge recomputes the filtered views over all mistakes, so merging each batch would cost more
+ * and more as a run goes on). `cancel` drops what is pending: the run's end reloads from the database.
+ */
+function throttledMerge(accept: () => boolean): { add(ms: readonly Mistake[]): void; cancel(): void } {
+  const pending = new Map<string, Mistake>();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let last = -Infinity;
+  const flush = (): void => {
+    timer = null;
+    last = performance.now();
+    if (pending.size > 0 && accept()) mergeIntoMistakes(pending.values());
+    pending.clear();
+  };
+  return {
+    add(ms) {
+      if (!accept()) return;
+      for (const m of ms) pending.set(m.id, m);
+      if (timer !== null) return;
+      const wait = last + MISTAKES_MERGE_MS - performance.now();
+      if (wait <= 0) flush();
+      else timer = setTimeout(flush, wait);
+    },
+    cancel() {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      pending.clear();
+    },
+  };
+}
+
 async function runAnalysis(profileId: string, signal: AbortSignal): Promise<void> {
   const isSelf = (): boolean => profileId === selfProfile.value?.id;
   await markAnalysisStale(profileId);
+  // The run uses the settings as they are now, and only these are recorded as analysed: Settings can
+  // be changed while it runs, and such a change must still apply at the next refresh.
+  const used = await repo.getSettings();
+  const merge = throttledMerge(isSelf);
   let complete = false;
   try {
     ({ complete } = await analyzeProfile(profileId, {
       pool: getPool(),
       book: deps.book,
       signal,
+      settings: used,
       now,
       onProgress: p => (analysisProgress.value = p),
-      onMistakes: ms => {
-        if (isSelf()) mergeIntoMistakes(ms);
-      },
+      onMistakes: ms => merge.add(ms),
       onPositionError: (fen, err) => logError(`analysis ${fen}`, err),
     }));
   } catch (err) {
     if (!isAbortError(err) && typeof document !== 'undefined' && document.hidden) resumeOnVisible = profileId;
     throw err;
   } finally {
+    merge.cancel();
     if (isSelf()) mistakes.value = await repo.getMistakes(profileId);
   }
-  if (complete) await repo.setMeta(analysisKeyMeta(profileId), analysisKey());
+  if (complete) await repo.setMeta(analysisKeyMeta(profileId), analysisKeyOf(used));
   else {
     // The run finished without some positions; say so (the progress card only shows failed runs).
     const detail = analysisProgress.value?.profileId === profileId ? analysisProgress.value.error : undefined;
@@ -466,7 +532,7 @@ async function needsAnalysis(profileId: string, added: number): Promise<boolean>
   if ((await repo.countGames(profileId)) === 0) return false;
   const profile = await repo.getProfile(profileId);
   if (!profile?.lastAnalysisAt) return true;
-  return (await repo.getMeta<string>(analysisKeyMeta(profileId))) !== analysisKey();
+  return (await repo.getMeta<string>(analysisKeyMeta(profileId))) !== analysisKeyOf(settings.value);
 }
 
 /** Sync then analyse. A profile's first run fetches the newest 300 games, analyses, backfills, analyses again. */
@@ -571,20 +637,39 @@ async function validateAccounts(accounts: readonly Account[]): Promise<Account[]
 /**
  * New accounts for an existing profile: a removed account's sync state and games go (e.g. a mistyped
  * username that belonged to someone else), and so do all games of a platform that has no account left.
+ * When that leaves no games, the mistakes found in them go too (reviewed ones become dormant).
  */
 async function replaceAccounts(profile: Profile, accounts: Account[]): Promise<void> {
   const removed = profile.accounts.filter(a => !accounts.some(b => sameAccount(a, b)));
-  // A sync still running for a removed account would store its games again after the delete.
+  const added = accounts.filter(a => !profile.accounts.some(b => sameAccount(a, b)));
+  // A running refresh read the old account list: it would store a removed account's games again after
+  // the delete, and it would never download an added account (a refresh requested afterwards would only
+  // share that run). Stopped and forgotten, the refresh the caller starts next uses the new accounts.
+  // A removal stops every job of the profile (an analysis would write mistakes of deleted games); an
+  // addition only the refresh (a PGN import or an analysis is still valid).
   if (removed.length > 0) await stopJobsOf(profile.id);
+  else if (added.length > 0) await stopJobsOf(profile.id, 'refresh');
+  let deleted = 0;
   for (const old of removed) {
     await repo.deleteSyncState(syncStateKey(profile.id, old));
-    let deleted = await repo.deleteGamesOfAccount(profile.id, old);
+    deleted += await repo.deleteGamesOfAccount(profile.id, old);
     if (!accounts.some(b => b.platform === old.platform)) deleted += await repo.deleteGamesOfPlatform(profile.id, old.platform);
-    if (deleted > 0) await markAnalysisStale(profile.id);
+  }
+  const patch: Partial<Profile> = {};
+  if (deleted > 0) {
+    // Games remain: the next refresh re-analyses them, and that complete run reconciles the mistakes.
+    await markAnalysisStale(profile.id);
+    if ((await repo.countGames(profile.id)) === 0) {
+      // No games left (the new account has none yet, or its first sync fails): no analysis will run, so
+      // the removed games' mistakes are reconciled now, and the profile starts over as never analysed
+      // (the next refresh is a quick first pass).
+      await repo.reconcileMistakes(profile.id, new Set());
+      patch.lastAnalysisAt = undefined;
+    }
   }
   const defaultName = profile.accounts[0]?.username;
   const name = !defaultName || profile.name === defaultName ? accounts[0]!.username : profile.name;
-  await repo.updateProfile(profile.id, { accounts, name });
+  await repo.updateProfile(profile.id, { ...patch, accounts, name });
 }
 
 /** Validates the accounts exist, creates/updates the self profile and starts refresh(). */
@@ -965,12 +1050,40 @@ let initPromise: Promise<void> | null = null;
 let startup: Promise<void> = Promise.resolve();
 const teardown: (() => void)[] = [];
 
+/**
+ * Clears otherTabBusy once no tab holds the job lock any more: a tab closed, crashed or discarded
+ * mid-job never broadcasts 'job-done', but the browser releases its lock. Nothing is cleared while this
+ * tab runs a job, or when the lock cannot be queried (then only 'job-done' clears it).
+ */
+async function recheckOtherTab(): Promise<void> {
+  if (!otherTabBusy.value || currentJob !== null) return;
+  if ((await queryJobLock()) !== false) return;
+  if (!otherTabBusy.value || currentJob !== null) return;
+  otherTabBusy.value = false;
+  // That tab may have stored games and mistakes before it went away.
+  await reloadAll();
+}
+
 function listenToEnvironment(): void {
   teardown.push(
     onJobBroadcast(msg => {
       otherTabBusy.value = msg.type === 'job-started';
       if (msg.type === 'job-done') void reloadAll().catch(reportError('reload'));
     }),
+  );
+  // Polls only while another tab is said to be busy (no Web Lock waiter: it would compete with this
+  // tab's own `ifAvailable` requests for the lock).
+  let poll: ReturnType<typeof setInterval> | null = null;
+  const stopPoll = (): void => {
+    if (poll !== null) clearInterval(poll);
+    poll = null;
+  };
+  teardown.push(
+    otherTabBusy.subscribe(busyElsewhere => {
+      if (!busyElsewhere) stopPoll();
+      else poll ??= setInterval(() => void recheckOtherTab().catch(reportError('reload')), OTHER_TAB_POLL_MS);
+    }),
+    stopPoll,
   );
   if (typeof window !== 'undefined') {
     const timer = setInterval(tick, CLOCK_TICK_MS);
@@ -980,6 +1093,8 @@ function listenToEnvironment(): void {
     const onVisible = (): void => {
       if (document.visibilityState !== 'visible') return;
       tick();
+      // Timers are throttled in hidden tabs: check at once whether the other tab's job is still running.
+      void recheckOtherTab().catch(reportError('reload'));
       const id = resumeOnVisible;
       resumeOnVisible = null;
       if (id) void analyze(id).catch(reportError('resume'));

@@ -20,8 +20,15 @@
       content="Find the opening mistakes you keep repeating — and fix them. Free, private, runs in your browser."
     />
     <meta property="og:url" content="https://smanahian.github.io/chess-analyzer/" />
-    <meta property="og:image" content="https://smanahian.github.io/chess-analyzer/icon.svg" />
+    <!-- A PNG: most link previews (Facebook, X, LinkedIn, chat apps) do not render SVG. -->
+    <meta property="og:image" content="https://smanahian.github.io/chess-analyzer/icon-512.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
+    <meta property="og:image:alt" content="Chess Analyzer logo" />
     <meta name="twitter:card" content="summary" />
+    <meta name="twitter:image" content="https://smanahian.github.io/chess-analyzer/icon-512.png" />
+    <meta name="twitter:image:alt" content="Chess Analyzer logo" />
     <script>
       // Theme before first paint (same rules as src/ui/theme.ts): saved choice, else the system, else dark.
       (function () {

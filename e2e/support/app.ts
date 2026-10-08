@@ -1,12 +1,14 @@
-// Shared e2e fixtures and helpers: the mocked network (installed for every test), page-error
-// collection, IndexedDB reads for waiting on background jobs, and chessground board interaction.
+// Shared e2e fixtures and helpers: the mocked network (installed for every test), page-error and
+// CSP-violation collection, IndexedDB reads for waiting on background jobs, and chessground board
+// interaction.
 import { test as base, expect, type Locator, type Page } from '@playwright/test';
 import type { Mistake, Profile, ReviewState, Settings } from '../../src/core/types';
+import { watchCsp } from './csp';
 import { mockNetwork, type MockNetwork, type MockOptions } from './network';
 
 export { expect };
 
-export const test = base.extend<{ mockOptions: MockOptions; net: MockNetwork; pageErrors: string[] }>({
+export const test = base.extend<{ mockOptions: MockOptions; net: MockNetwork; pageErrors: string[]; cspViolations: string[] }>({
   mockOptions: [{}, { option: true }],
   net: [
     async ({ context, mockOptions }, use) => {
@@ -22,6 +24,14 @@ export const test = base.extend<{ mockOptions: MockOptions; net: MockNetwork; pa
       page.on('pageerror', err => errors.push(`${err.name}: ${err.message}`));
       await use(errors);
       expect(errors, 'uncaught errors in the page').toEqual([]);
+    },
+    { auto: true },
+  ],
+  cspViolations: [
+    async ({ context }, use) => {
+      const violations = await watchCsp(context);
+      await use(violations);
+      expect(violations, 'Content-Security-Policy violations').toEqual([]);
     },
     { auto: true },
   ],

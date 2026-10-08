@@ -3,7 +3,7 @@
 // moves, the games where it happened, engine details, and the actions (train, master, repertoire,
 // snooze, copy FEN, open on Lichess) with undo.
 import type { ComponentChildren, JSX } from 'preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import * as store from '../../state/store';
 import { START_FEN } from '../../core/chess';
 import { filterOccurrences } from '../../core/filters';
@@ -13,14 +13,15 @@ import { CopyButton } from '../components/buttons';
 import { EvalText } from '../components/EvalText';
 import { colorName, moveLabel, plural, relativeTime, shortDate, sideToMove, speedName } from '../components/format';
 import { GameLink } from '../components/GameLink';
-import { isShortcut } from '../components/gestures';
+import { isKeyShortcut, isPageTarget } from '../components/gestures';
 import { runAction, toast } from '../components/hooks';
+import { shortcutsOn } from '../components/keyboard';
 import { Icon } from '../components/Icon';
 import { OutcomeBadge } from '../components/LeakListItem';
 import {
   habitLabel,
   headlineOf,
-  lastMoveLabel,
+  leakBoardLabel,
   frequencyText,
   lichessAnalysisUrl,
   outcomeBadge,
@@ -57,13 +58,30 @@ export interface LeakDetailProps {
   now: number;
   /** Phones: back to the list and previous/next. */
   nav?: LeakNav;
-  /** After master / ignore / snooze / restore, so the page can move to the next leak. */
-  onStatusChange?(m: Mistake): void;
+  /** The leak's title is the page's h1 (phones: the detail is a screen of its own), default 2. */
+  headingLevel?: 1 | 2;
+  /**
+   * After master / ignore / snooze / restore, so the page can move to the next leak; returns the leak
+   * shown next (named in the toast). `viaKeyboard`: the button was pressed with the keyboard.
+   */
+  onStatusChange?(m: Mistake, viaKeyboard: boolean): Mistake | undefined | void;
   /** After an Undo of such a change, so the page can come back to this leak. */
   onUndo?(m: Mistake): void;
 }
 
-export function LeakDetail({ m, view, tab, orientation, onFlip, now, nav, onStatusChange, onUndo }: LeakDetailProps): JSX.Element {
+/**
+ * Keys that step through the moves: ←/→ when the board has focus or nothing does (they never scroll
+ * a page that does not scroll sideways), Home/End only on the board (elsewhere they scroll the page).
+ */
+export function stepKey(key: string, onBoard: boolean, onPage: boolean): 'back' | 'forward' | 'start' | 'end' | null {
+  if (!onBoard && !onPage) return null;
+  if (key === 'ArrowLeft') return 'back';
+  if (key === 'ArrowRight') return 'forward';
+  if (!onBoard) return null;
+  return key === 'Home' ? 'start' : key === 'End' ? 'end' : null;
+}
+
+export function LeakDetail({ m, view, tab, orientation, onFlip, now, nav, headingLevel = 2, onStatusChange, onUndo }: LeakDetailProps): JSX.Element {
   const lines: Record<string, LineSource> = {
     best: { startFen: m.fen, ucis: m.bestLine },
     played: { startFen: m.fen, ucis: m.playedLine },
@@ -72,11 +90,13 @@ export function LeakDetail({ m, view, tab, orientation, onFlip, now, nav, onStat
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (!isShortcut(e)) return;
-      if (e.key === 'ArrowLeft') cursor.step(-1);
-      else if (e.key === 'ArrowRight') cursor.step(1);
-      else if (e.key === 'Home') cursor.toStart();
-      else if (e.key === 'End') cursor.toEnd();
+      if (!isKeyShortcut(e, shortcutsOn.value) || e.shiftKey) return;
+      const onBoard = e.target instanceof Element && !!e.target.closest('.ld-board-col .board');
+      const step = stepKey(e.key, onBoard, isPageTarget(e.target));
+      if (step === 'back') cursor.step(-1);
+      else if (step === 'forward') cursor.step(1);
+      else if (step === 'start') cursor.toStart();
+      else if (step === 'end') cursor.toEnd();
       else return;
       e.preventDefault();
     };
@@ -91,15 +111,19 @@ export function LeakDetail({ m, view, tab, orientation, onFlip, now, nav, onStat
   const atRoot = cursor.view === null;
   const habit = moveLabel(m.fen, m.move);
   const best = moveLabel(m.fen, m.bestMove);
+  const boardLabel = leakBoardLabel(m, cursor.cursor);
+  const Title = headingLevel === 1 ? 'h1' : 'h2';
+  const Section = headingLevel === 1 ? 'h2' : 'h3';
+  const Sub = headingLevel === 1 ? 'h3' : 'h4';
 
   return (
     <article class="leak-detail" aria-labelledby="ld-title">
       {nav ? <DetailNav nav={nav} /> : null}
       <header class="ld-head">
         <div class="ld-title-row">
-          <h2 id="ld-title" class="ld-title">
+          <Title id="ld-title" class="ld-title" tabIndex={-1}>
             <span class="move move-habit">{habitLabel(m)}</span>
-          </h2>
+          </Title>
           <SeverityPill severity={m.severity} kind={m.kind} confidence={m.confidence} />
         </div>
         <p class="ld-opening">
@@ -116,8 +140,16 @@ export function LeakDetail({ m, view, tab, orientation, onFlip, now, nav, onStat
             orientation={orientation}
             lastMove={atRoot ? m.path[m.path.length - 1] : cursor.view?.lastMove}
             arrows={atRoot ? arrows : []}
-            label={`Position after ${lastMoveLabel(m.path) ?? 'the start'}. ${colorName(m.color)} to move. Orange arrow: your usual ${habit}. Blue arrow: the best move, ${best}.`}
+            label={boardLabel}
+            describedBy="ld-board-keys"
+            focusable
           />
+          <p id="ld-board-keys" class="sr-only">
+            Left and right arrow keys step through the moves; Home and End go to the start of the game and the end of the best line.
+          </p>
+          <p class="sr-only" aria-live="polite">
+            {atRoot ? '' : boardLabel}
+          </p>
           <div class="ld-board-bar">
             <div class="board-legend" aria-hidden={!atRoot}>
               <span class={`legend-item legend-habit${atRoot ? '' : ' is-dim'}`}>
@@ -129,26 +161,16 @@ export function LeakDetail({ m, view, tab, orientation, onFlip, now, nav, onStat
                 <span>Best move</span>
               </span>
             </div>
-            <div class="stepper" role="group" aria-label="Step through the moves">
-              <button type="button" class="btn btn-ghost btn-icon btn-sm" onClick={cursor.toStart} disabled={!cursor.canBack} aria-label="Starting position">
-                <Icon name="first" size={18} />
-              </button>
-              <button type="button" class="btn btn-ghost btn-icon btn-sm" onClick={() => cursor.step(-1)} disabled={!cursor.canBack} aria-label="Previous move">
-                <Icon name="back" size={18} />
-              </button>
-              <button type="button" class="btn btn-ghost btn-icon btn-sm" onClick={cursor.toRoot} disabled={atRoot} aria-label="Back to the leak position">
-                <Icon name="leaks" size={18} />
-              </button>
-              <button type="button" class="btn btn-ghost btn-icon btn-sm" onClick={() => cursor.step(1)} disabled={!cursor.canForward} aria-label="Next move">
-                <Icon name="chevron" size={18} />
-              </button>
-              <button type="button" class="btn btn-ghost btn-icon btn-sm" onClick={cursor.toEnd} aria-label="End of the best line">
-                <Icon name="last" size={18} />
-              </button>
-              <button type="button" class="btn btn-ghost btn-icon btn-sm" onClick={onFlip} aria-label="Flip the board" title="Flip (f)">
-                <Icon name="flip" size={18} />
-              </button>
-            </div>
+            <Stepper
+              items={[
+                { label: 'Starting position', icon: 'first', run: cursor.toStart, enabled: cursor.canBack },
+                { label: 'Previous move', icon: 'back', run: () => cursor.step(-1), enabled: cursor.canBack },
+                { label: 'Back to the leak position', icon: 'leaks', run: cursor.toRoot, enabled: !atRoot },
+                { label: 'Next move', icon: 'chevron', run: () => cursor.step(1), enabled: cursor.canForward },
+                { label: 'End of the best line', icon: 'last', run: cursor.toEnd, enabled: true },
+                { label: 'Flip the board', icon: 'flip', run: onFlip, enabled: true, title: 'Flip (f)' },
+              ]}
+            />
           </div>
         </div>
 
@@ -182,10 +204,10 @@ export function LeakDetail({ m, view, tab, orientation, onFlip, now, nav, onStat
       </div>
 
       <section class="card ld-section" aria-labelledby="ld-lines-title">
-        <h3 id="ld-lines-title" class="ld-section-title">
+        <Section id="ld-lines-title" class="ld-section-title">
           Lines <span class="small faint">· tap a move to see it on the board</span>
-        </h3>
-        <LineBlock title="How you get here">
+        </Section>
+        <LineBlock heading={Sub} title="How you get here">
           <LineView
             startFen={START_FEN}
             ucis={m.path}
@@ -195,7 +217,7 @@ export function LeakDetail({ m, view, tab, orientation, onFlip, now, nav, onStat
             maxPlies={40}
           />
         </LineBlock>
-        <LineBlock title={<>Better: <span class="move move-best">{best}</span></>}>
+        <LineBlock heading={Sub} title={<>Better: <span class="move move-best">{best}</span></>}>
           <LineView
             startFen={m.fen}
             ucis={m.bestLine}
@@ -205,7 +227,7 @@ export function LeakDetail({ m, view, tab, orientation, onFlip, now, nav, onStat
             onSelect={i => cursor.select('best', i)}
           />
         </LineBlock>
-        <LineBlock title={<>What happens after <span class="move move-habit">{habit}</span></>}>
+        <LineBlock heading={Sub} title={<>What happens after <span class="move move-habit">{habit}</span></>}>
           <LineView
             startFen={m.fen}
             ucis={m.playedLine}
@@ -218,10 +240,10 @@ export function LeakDetail({ m, view, tab, orientation, onFlip, now, nav, onStat
       </section>
 
       <div class="ld-two">
-        <Results m={m} habit={habit} />
-        <EngineInfo m={m} now={now} />
+        <Results m={m} habit={habit} heading={Section} />
+        <EngineInfo m={m} now={now} heading={Section} />
       </div>
-      <Games m={m} habit={habit} orientation={m.color} />
+      <Games key={m.id} m={m} habit={habit} orientation={m.color} heading={Section} />
     </article>
   );
 }
@@ -241,12 +263,66 @@ function DetailNav({ nav }: { nav: LeakNav }): JSX.Element {
   );
 }
 
+interface StepperItem {
+  label: string;
+  icon: 'first' | 'back' | 'leaks' | 'chevron' | 'last' | 'flip';
+  run(): void;
+  enabled: boolean;
+  title?: string;
+}
+
+/**
+ * The move stepper as a toolbar: one Tab stop, ←/→ (and Home/End) move between its buttons, Enter or
+ * Space presses one. Unavailable buttons stay focusable (aria-disabled), so focus is never lost when
+ * the end of a line is reached.
+ */
+function Stepper({ items }: { items: readonly StepperItem[] }): JSX.Element {
+  const [active, setActive] = useState(3); // "Next move"
+  const bar = useRef<HTMLDivElement>(null);
+  const focusAt = (i: number): void => {
+    const n = items.length;
+    const next = ((i % n) + n) % n;
+    setActive(next);
+    bar.current?.querySelectorAll<HTMLButtonElement>('button')[next]?.focus();
+  };
+  const onKeyDown = (e: KeyboardEvent): void => {
+    const i = active;
+    if (e.key === 'ArrowRight') focusAt(i + 1);
+    else if (e.key === 'ArrowLeft') focusAt(i - 1);
+    else if (e.key === 'Home') focusAt(0);
+    else if (e.key === 'End') focusAt(items.length - 1);
+    else return;
+    e.preventDefault();
+  };
+  return (
+    <div class="stepper" role="toolbar" aria-label="Step through the moves" ref={bar} onKeyDown={onKeyDown}>
+      {items.map((item, i) => (
+        <button
+          key={item.label}
+          type="button"
+          class="btn btn-ghost btn-icon btn-sm"
+          tabIndex={i === active ? 0 : -1}
+          aria-disabled={item.enabled ? undefined : 'true'}
+          aria-label={item.label}
+          title={item.title}
+          onFocus={() => setActive(i)}
+          onClick={() => {
+            if (item.enabled) item.run();
+          }}
+        >
+          <Icon name={item.icon} size={18} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function NavArrow({ to, label, icon }: { to?: string; label: string; icon: 'back' | 'chevron' }): JSX.Element {
   if (!to) {
     return (
-      <span class="btn btn-ghost btn-icon btn-sm" aria-disabled="true" aria-label={label}>
+      <button type="button" class="btn btn-ghost btn-icon btn-sm" disabled aria-label={label}>
         <Icon name={icon} size={18} />
-      </span>
+      </button>
     );
   }
   return (
@@ -267,10 +343,12 @@ function Headline({ m, view }: { m: Mistake; view: ViewMistake }): JSX.Element {
   );
 }
 
-function LineBlock({ title, children }: { title: ComponentChildren; children: ComponentChildren }): JSX.Element {
+type HeadingTag = 'h2' | 'h3' | 'h4';
+
+function LineBlock({ heading: Heading, title, children }: { heading: HeadingTag; title: ComponentChildren; children: ComponentChildren }): JSX.Element {
   return (
     <div class="ld-line">
-      <h4 class="ld-line-title">{title}</h4>
+      <Heading class="ld-line-title">{title}</Heading>
       {children}
     </div>
   );
@@ -303,10 +381,30 @@ const DONE_TEXT: Readonly<Record<StatusAction, string>> = {
   snooze: `Snoozed for ${SNOOZE_DAYS} days.`,
   restore: 'Back in your active leaks.',
 };
+const MOVED_TO: Readonly<Record<StatusAction, string>> = { mastered: 'Mastered', repertoire: 'Ignored', snooze: 'Snoozed', restore: 'Active' };
 
-/** Changes a leak's status with an Undo toast; `after` runs on success, `undone` after an undo. */
-export async function changeStatus(m: Mistake, action: StatusAction, after?: (m: Mistake) => void, undone?: (m: Mistake) => void): Promise<void> {
+/**
+ * The toast after a status change, naming the leak that moved and the one now shown:
+ * "Marked as mastered. 2…c4?? moved to Mastered. Now showing 3…Qa5?."
+ */
+export function statusToastText(action: StatusAction, moved: string, next?: string): string {
+  return `${DONE_TEXT[action]} ${moved} moved to ${MOVED_TO[action]}.${next ? ` Now showing ${next}.` : ''}`;
+}
+
+/**
+ * Changes a leak's status with an Undo toast; `after` runs on success (and returns the leak shown
+ * next), `undone` after an undo. With `viaKeyboard`, focus moves to the toast's Undo button and back
+ * to the leak's title when the toast closes.
+ */
+export async function changeStatus(
+  m: Mistake,
+  action: StatusAction,
+  after?: (m: Mistake, viaKeyboard: boolean) => Mistake | undefined | void,
+  undone?: (m: Mistake) => void,
+  opts: { viaKeyboard?: boolean } = {},
+): Promise<void> {
   const before = snapshot(m);
+  const viaKeyboard = opts.viaKeyboard ?? false;
   const ok = await runAction(() =>
     action === 'mastered' ? store.setMistakeStatus(m.id, 'mastered')
     : action === 'repertoire' ? store.setMistakeStatus(m.id, 'ignored', { reason: 'repertoire' })
@@ -314,16 +412,26 @@ export async function changeStatus(m: Mistake, action: StatusAction, after?: (m:
     : store.setMistakeStatus(m.id, 'active'),
   );
   if (!ok) return;
-  after?.(m);
-  toast('success', DONE_TEXT[action], {
-    label: 'Undo',
-    run: () => void runAction(() => restoreSnapshot(m.id, before)).then(ok => ok && undone?.(m)),
-  });
+  const next = after?.(m, viaKeyboard) ?? undefined;
+  toast(
+    'success',
+    statusToastText(action, habitLabel(m), next ? habitLabel(next) : undefined),
+    {
+      label: 'Undo',
+      run: () => void runAction(() => restoreSnapshot(m.id, before)).then(ok => ok && undone?.(m)),
+    },
+    { focusAction: viaKeyboard, returnFocus: () => document.getElementById('ld-title') },
+  );
 }
 
-function StatusBanner({ m, tab, now, onStatusChange, onUndo }: { m: Mistake; tab: LeakTab | null; now: number; onStatusChange?(m: Mistake): void; onUndo?(m: Mistake): void }): JSX.Element | null {
+/** A button press from the keyboard (Enter / Space) has no pointer position and detail 0. */
+const fromKeyboard = (e: MouseEvent): boolean => e.detail === 0;
+
+type OnStatusChange = LeakDetailProps['onStatusChange'];
+
+function StatusBanner({ m, tab, now, onStatusChange, onUndo }: { m: Mistake; tab: LeakTab | null; now: number; onStatusChange?: OnStatusChange; onUndo?(m: Mistake): void }): JSX.Element | null {
   const restore = (
-    <button type="button" class="btn btn-sm" onClick={() => void changeStatus(m, 'restore', onStatusChange, onUndo)}>
+    <button type="button" class="btn btn-sm" onClick={e => void changeStatus(m, 'restore', onStatusChange, onUndo, { viaKeyboard: fromKeyboard(e) })}>
       <Icon name="repeat" size={16} /> Restore
     </button>
   );
@@ -358,8 +466,9 @@ function StatusBanner({ m, tab, now, onStatusChange, onUndo }: { m: Mistake; tab
   return null;
 }
 
-function Actions({ m, tab, orientation, onStatusChange, onUndo }: { m: Mistake; tab: LeakTab | null; orientation: Color; onStatusChange?(m: Mistake): void; onUndo?(m: Mistake): void }): JSX.Element {
+function Actions({ m, tab, orientation, onStatusChange, onUndo }: { m: Mistake; tab: LeakTab | null; orientation: Color; onStatusChange?: OnStatusChange; onUndo?(m: Mistake): void }): JSX.Element {
   const listed = tab === 'active';
+  const act = (action: StatusAction) => (e: MouseEvent) => void changeStatus(m, action, onStatusChange, onUndo, { viaKeyboard: fromKeyboard(e) });
   return (
     <div class="ld-actions">
       <a class="btn btn-primary ld-train" href={href('train', undefined, { leak: m.shortId })}>
@@ -367,13 +476,13 @@ function Actions({ m, tab, orientation, onStatusChange, onUndo }: { m: Mistake; 
       </a>
       {listed ? (
         <div class="ld-action-grid">
-          <button type="button" class="btn" onClick={() => void changeStatus(m, 'mastered', onStatusChange, onUndo)}>
+          <button type="button" class="btn" onClick={act('mastered')}>
             <Icon name="check" size={18} /> Mark mastered
           </button>
-          <button type="button" class="btn" onClick={() => void changeStatus(m, 'repertoire', onStatusChange, onUndo)}>
+          <button type="button" class="btn" onClick={act('repertoire')}>
             <Icon name="openings" size={18} /> This is my repertoire
           </button>
-          <button type="button" class="btn" onClick={() => void changeStatus(m, 'snooze', onStatusChange, onUndo)}>
+          <button type="button" class="btn" onClick={act('snooze')}>
             <Icon name="clock" size={18} /> Snooze {SNOOZE_DAYS} days
           </button>
         </div>
@@ -391,13 +500,13 @@ function Actions({ m, tab, orientation, onStatusChange, onUndo }: { m: Mistake; 
 
 // ── Results, engine, games ──────────────────────────────────────────────
 
-function Results({ m, habit }: { m: Mistake; habit: string }): JSX.Element {
+function Results({ m, habit, heading: Heading }: { m: Mistake; habit: string; heading: HeadingTag }): JSX.Element {
   const split = scoreSplit(m, store.filters.value);
   return (
     <section class="card ld-section" aria-labelledby="ld-results-title">
-      <h3 id="ld-results-title" class="ld-section-title">
+      <Heading id="ld-results-title" class="ld-section-title">
         Your results from here
-      </h3>
+      </Heading>
       <dl class="ld-results">
         <div>
           <dt>
@@ -421,12 +530,12 @@ function Results({ m, habit }: { m: Mistake; habit: string }): JSX.Element {
   );
 }
 
-function EngineInfo({ m, now }: { m: Mistake; now: number }): JSX.Element {
+function EngineInfo({ m, now, heading: Heading }: { m: Mistake; now: number; heading: HeadingTag }): JSX.Element {
   return (
     <section class="card ld-section" aria-labelledby="ld-engine-title">
-      <h3 id="ld-engine-title" class="ld-section-title">
+      <Heading id="ld-engine-title" class="ld-section-title">
         How sure is this?
-      </h3>
+      </Heading>
       <p class="small">
         Stockfish 19 (in your browser) checked this position to depth <strong class="num">{m.evalDepth}</strong>{' '}
         <span class="muted">· {relativeTime(m.updatedAt, now)}</span>.
@@ -445,16 +554,16 @@ function EngineInfo({ m, now }: { m: Mistake; now: number }): JSX.Element {
 
 const RESULT_LETTER: Readonly<Record<Occurrence['o'], string>> = { win: 'Won', loss: 'Lost', draw: 'Draw', unknown: '—' };
 
-function Games({ m, habit, orientation }: { m: Mistake; habit: string; orientation: Color }): JSX.Element {
+function Games({ m, habit, orientation, heading: Heading }: { m: Mistake; habit: string; orientation: Color; heading: HeadingTag }): JSX.Element {
   const [all, setAll] = useState(false);
   const f = store.filters.value;
   const occ = useMemo(() => filterOccurrences(m.occurrences, f), [m.occurrences, f]);
   const shown = all ? occ : occ.slice(0, GAMES_SHOWN);
   return (
     <section class="card ld-section" aria-labelledby="ld-games-title">
-      <h3 id="ld-games-title" class="ld-section-title">
+      <Heading id="ld-games-title" class="ld-section-title">
         Your games from this position <span class="small faint num">· {occ.length}</span>
-      </h3>
+      </Heading>
       {occ.length === 0 ? (
         <p class="small muted">No games match your filters.</p>
       ) : (

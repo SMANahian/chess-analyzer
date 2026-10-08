@@ -55,3 +55,12 @@ describe('friendlyError', () => {
     expect(friendlyError(undefined).kind).toBe('unknown');
   });
 });
+
+describe('About: licences shipped with the build', () => {
+  it('links relative to the app base, so they resolve under any sub-path', async () => {
+    const { ENGINE_LICENSE, SHIPPED_LICENSES, shippedUrl } = await import('../pages/About');
+    expect(shippedUrl(SHIPPED_LICENSES, './')).toBe('./THIRD-PARTY-LICENSES.md');
+    expect(shippedUrl(ENGINE_LICENSE, '/chess-analyzer/')).toBe('/chess-analyzer/engine/COPYING.txt');
+    expect(shippedUrl(ENGINE_LICENSE, '/chess-analyzer')).toBe('/chess-analyzer/engine/COPYING.txt');
+  });
+});

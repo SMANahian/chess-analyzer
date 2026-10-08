@@ -3,9 +3,12 @@
 `npm run test:e2e` builds the app (`npm run build`), serves it with `vite preview` on port 4173 and runs
 the specs below in Chromium with the **real** Stockfish 19 lite WASM engine. Lichess and Chess.com are
 replaced by fakes that serve the files in `e2e/fixtures/`; every other external request is blocked, and
-each test fails if one was attempted or if the page threw an uncaught error. A preview server already
-running on port 4173 is reused (except with `CI` set). `E2E_WEBKIT=1` adds a WebKit project (its
-browser must be installed). Specs under `e2e/live/` (real APIs) are not part of this suite.
+each test fails if one was attempted, if the page threw an uncaught error, or if the page reported a
+Content-Security-Policy violation (the build's CSP `<meta>` is enforced). A preview server already
+running on port 4173 is reused. With `CI` set, the suite does not build: it serves the existing `dist/`
+(CI's Build step has just built and checked it), so run `npm run build` first if you set `CI` locally.
+`E2E_WEBKIT=1` adds a WebKit project (its browser must be installed). Specs under `e2e/live/` (real
+APIs) are not part of this suite.
 
 The whole suite takes about two minutes (the real-engine analyses dominate).
 
@@ -18,12 +21,13 @@ The whole suite takes about two minutes (the real-engine analyses dominate).
 | `network-error.spec.ts` | Lichess unreachable: the friendly error with “Upload a PGN file instead”, nothing stored. Only the game export failing: the dashboard's error banner, “No games yet” (not “no mistakes”), no backfill retry, and the PGN upload in Settings |
 | `offline.spec.ts` | after a first visit, with the network cut: app shell, engine (JS + WASM) and example report from the service worker cache; a new training move checked by the engine |
 | `mobile.spec.ts` | 390 × 844 touch: bottom tab bar, leak list → leak screen → next → back, training board, More sheet, no horizontal scroll |
-| `demo.spec.ts` | “See an example report” loads `public/demo/demo.json`, makes no request, and “Analyze my own games” removes it |
+| `demo.spec.ts` | the page carries its CSP; “See an example report” loads `public/demo/demo.json`, makes no request, and “Analyze my own games” removes it |
 
-`support/` holds the shared pieces: `network.ts` (the fakes), `app.ts` (test fixtures, IndexedDB
-peeks used to wait for background jobs, chessground board helpers), `session.ts` (one browser context
-for a serial journey), `fixtures.ts` (fixture loading and the planted mistakes' URL ids) and
-`backup.ts` (the hand-made promotion backup).
+`support/` holds the shared pieces: `network.ts` (the fakes), `csp.ts` (collects the page's
+`securitypolicyviolation` events), `app.ts` (test fixtures, IndexedDB peeks used to wait for background
+jobs, chessground board helpers), `session.ts` (one browser context for a serial journey),
+`fixtures.ts` (fixture loading and the planted mistakes' URL ids) and `backup.ts` (the hand-made
+promotion backup).
 
 A note on CORS: a response fulfilled by Playwright skips the browser's CORS check, so a request blocked
 by CORS (or an ad-blocker, or being offline) is simulated the way the page experiences it — `fetch()`

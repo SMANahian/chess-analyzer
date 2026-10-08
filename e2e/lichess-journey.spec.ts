@@ -168,7 +168,12 @@ test('settings: download a backup, delete all data, restore it', async ({}, info
   await expect(page.locator('.toast')).toContainText('Backup downloaded.');
 
   await page.getByRole('button', { name: 'Delete all data' }).click();
-  await page.getByRole('button', { name: 'Click again to delete everything' }).click();
+  const confirm = page.getByRole('dialog', { name: 'Delete all data?' });
+  await expect(confirm.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  // "Delete everything" ignores clicks in the first MIN_CONFIRM_MS (600 ms, src/ui/components/buttons.tsx)
+  // after the dialog opens, so the second click of a double-click on "Delete all data" cannot land on it.
+  await page.waitForTimeout(700);
+  await confirm.getByRole('button', { name: 'Delete everything' }).click();
   await expect(page.getByRole('heading', { name: /Find the opening mistakes you keep repeating/ })).toBeVisible();
   expect(await dbAll(page, 'games')).toEqual([]);
   expect(await dbMistakes(page)).toEqual([]);

@@ -11,6 +11,11 @@ test('the example report loads, can be explored, and is removed for your own gam
   expect(listed.length).toBeGreaterThan(5);
 
   await openApp(page);
+  // The page runs under its Content-Security-Policy. A blocked inline script (a stale hash), style, fetch
+  // or worker would fail this and every other test through the cspViolations fixture.
+  const policy = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content');
+  expect(policy).toContain("script-src 'self' 'sha256-");
+  expect(policy).toContain("connect-src 'self' https://lichess.org https://api.chess.com");
   await page.getByRole('button', { name: 'See an example report' }).click();
   await expect(page.getByText('You’re looking at an example report')).toBeVisible();
   await expect(page.locator('.page-sub').first()).toContainText(`${profile!.name} · ${demo.games.length} games`);

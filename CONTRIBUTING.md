@@ -20,7 +20,7 @@ one:
 ```sh
 npm run typecheck
 npm test                          # Vitest
-npm run build
+npm run build                     # also type-checks, then checks dist/ (scripts/check-dist.mjs)
 npx playwright install chromium   # once
 npm run test:e2e                  # Playwright against the production build
 ```
@@ -30,6 +30,7 @@ npm run test:e2e                  # Playwright against the production build
   `src/engine/nodeWorker.ts`. Test behaviour and edge cases, not implementation details.
 - **End-to-end tests** live in `e2e/`. They run the production build in Chromium with the real engine,
   and Lichess and Chess.com are mocked from `e2e/fixtures/`. No test in CI may reach the real sites.
+  Every test also fails on an uncaught page error or a Content-Security-Policy violation.
 - **Live smoke test** (`e2e/live/`, `playwright.live.config.ts`, `npm run test:live`): the app against
   the real APIs. It runs in GitHub Actions (weekly, on sync changes, or on demand) and never in CI.
   `LIVE_MOCK=1` rehearses it offline.
@@ -48,9 +49,9 @@ Dependencies point one way: `core` ← `sources` / `engine` / `db` ← `services
 | `src/state/store.ts` | signals and actions | the only module the UI calls besides pure `core` helpers |
 | `src/ui/` | Preact pages and components | |
 
-`src/core/types.ts` holds the shared types, and [docs/CONTRACTS.md](docs/CONTRACTS.md) the module
-signatures. If you change a signature, update that file and every consumer. The algorithms are
-explained in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+`src/core/types.ts` holds the shared types, and [docs/CONTRACTS.md](docs/CONTRACTS.md) an overview of
+the module signatures (the code is authoritative). If you change a signature, update that file and
+every consumer. The algorithms are explained in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Conventions
 
@@ -79,6 +80,12 @@ explained in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - **TypeScript** is strict. Avoid `any`; where it is unavoidable, add a comment explaining why. Prefer
   small, focused functions, and write comments for the non-obvious reasons only.
 - **Board UI:** `@lichess-org/chessground` 10.x (the unscoped `chessground` package is deprecated).
+- **Content-Security-Policy:** the build adds a CSP `<meta>` to `index.html` (`scripts/vite-plugins.ts`).
+  Inline `<script>`s in `index.html` are allowed by a hash computed at build time, so edit them freely;
+  inline event handlers (`onclick=…`) and `javascript:` URLs in it fail the build. The app may only fetch from
+  its own origin, `https://lichess.org` and `https://api.chess.com`: a new host needs `connectSrc` in
+  `vite.config.ts`. Set styles through the CSSOM (`el.style.x`, Preact's `style` prop), not with
+  `setAttribute('style', …)` or `innerHTML` markup that carries `style` attributes.
 
 ## Maintenance tasks
 
@@ -90,10 +97,13 @@ explained in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
   Playwright's Chromium.
 - **Workflows:** job-level `env:` may only use the `github`, `inputs`, `vars`, `secrets`, `needs`,
   `strategy` and `matrix` contexts. Anything else (`runner.temp`, `steps.*`) makes GitHub reject the
-  whole file. Pages deploys only from `master`.
+  whole file. Pages deploys only from `master`, and only after the CI workflow (whose name, `CI`,
+  `pages.yml` refers to) has passed for that commit.
 
 ## Licence
 
 Contributions are accepted under the MIT licence of this repository. The app as distributed also
 bundles GPL-3.0 components (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)), so do not add
-dependencies whose licence is incompatible with GPL-3.0.
+dependencies whose licence is incompatible with GPL-3.0. The build ships the licence texts of every
+bundled package in `THIRD-PARTY-LICENSES.md` automatically (and fails if one is missing); when you add a
+runtime dependency, also add a row to `THIRD_PARTY_NOTICES.md`.

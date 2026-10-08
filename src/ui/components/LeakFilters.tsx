@@ -1,11 +1,12 @@
 // Filter bar for the Leaks list: search, colour and sort inline; everything else in a "Filters"
 // dialog (a bottom sheet on phones). Every change applies live through store.setFilters.
 import type { JSX } from 'preact';
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import * as store from '../../state/store';
 import { DEFAULT_FILTERS, type Severity, type Speed, type ViewFilters } from '../../core/types';
 import { Segmented, Toggle } from './forms';
 import { formatCount, plural, speedName } from './format';
+import { debounce } from './hooks';
 import { Icon } from './Icon';
 import {
   RANGE_MONTHS,
@@ -34,6 +35,8 @@ const SEVERITIES: readonly { value: Severity; label: string }[] = [
 const RANGE_LABEL: Readonly<Record<RangeMonths, string>> = { 0: 'All time', 3: '3 months', 6: '6 months', 12: '12 months' };
 const MIN_GAMES = [2, 3, 4, 5, 6, 8, 10] as const;
 const SPEED_ORDER: readonly Speed[] = DEFAULT_FILTERS.speeds;
+/** The search applies (and is saved) once typing pauses this long, not on every keystroke. */
+export const SEARCH_DEBOUNCE_MS = 150;
 
 /** Speeds that occur in the player's games (always at least one, so the chips never vanish). */
 function presentSpeeds(): Speed[] {
@@ -50,17 +53,7 @@ export function LeakFilters({ now }: { now: number }): JSX.Element {
   return (
     <div class="leak-filters">
       <div class="lf-row">
-        <label class="lf-search">
-          <span class="sr-only">Search leaks</span>
-          <Icon name="search" size={18} class="lf-search-icon" />
-          <input
-            class="input"
-            type="search"
-            placeholder="Search moves, openings"
-            value={f.query}
-            onInput={e => store.setFilters({ query: e.currentTarget.value })}
-          />
-        </label>
+        <SearchBox query={f.query} />
         <button type="button" class="btn lf-more" onClick={() => setOpen(true)} aria-haspopup="dialog">
           <Icon name="filter" size={18} />
           Filters
@@ -104,6 +97,43 @@ export function LeakFilters({ now }: { now: number }): JSX.Element {
       ) : null}
       <FilterDialog open={open} onClose={() => setOpen(false)} f={f} present={present} now={now} />
     </div>
+  );
+}
+
+/** The text search: shown as typed, applied to the list once typing pauses (SEARCH_DEBOUNCE_MS). */
+function SearchBox({ query }: { query: string }): JSX.Element {
+  const [text, setText] = useState(query);
+  const typing = useRef(false);
+  const apply = useMemo(
+    () =>
+      debounce((q: string) => {
+        typing.current = false;
+        store.setFilters({ query: q });
+      }, SEARCH_DEBOUNCE_MS),
+    [],
+  );
+  useEffect(() => () => apply.flush(), [apply]);
+  // A query changed elsewhere (cleared, or restored) shows here unless the user is typing.
+  useEffect(() => {
+    if (!typing.current) setText(query);
+  }, [query]);
+  return (
+    <label class="lf-search">
+      <span class="sr-only">Search leaks</span>
+      <Icon name="search" size={18} class="lf-search-icon" />
+      <input
+        class="input"
+        type="search"
+        placeholder="Search"
+        title="Search by move (Nxe4) or opening name"
+        value={text}
+        onInput={e => {
+          typing.current = true;
+          setText(e.currentTarget.value);
+          apply(e.currentTarget.value);
+        }}
+      />
+    </label>
   );
 }
 

@@ -2,7 +2,7 @@
 // before the question, how a verdict moves the attempt along (retry / reveal / done), and the grade.
 import { replay } from '../../core/chess';
 import { autoGrade, type AttemptOutcome } from '../../core/srs';
-import type { Color, Grade, Mistake, MoveVerdict, ReviewState, SessionCard } from '../../core/types';
+import type { Color, Grade, Mistake, MoveVerdict, ReviewState, Score, SessionCard } from '../../core/types';
 
 /** Wrong tries (the habit counts as one) before the answer is revealed. */
 export const MAX_FAILURES = 2;
@@ -19,6 +19,8 @@ export interface CardSpec {
   best: string;
   /** Engine line from `fen`, starting with `best`. */
   bestLine: string[];
+  /** The best move's score (side to move at `fen`). */
+  bestScore: Score;
   /** The user's own habit (self cards); undefined in prep drills. */
   habit?: string;
   /** The habit move and the engine's punishment, from `fen`. */
@@ -37,7 +39,7 @@ export function cardSpec(m: Mistake): CardSpec {
   const r = m.refutation;
   if (r) {
     const path = [...m.path, m.move];
-    return { fen: r.fen, userColor: opposite(m.color), path, lastMove: m.move, best: r.bestMove, bestLine: r.bestLine, prep: true };
+    return { fen: r.fen, userColor: opposite(m.color), path, lastMove: m.move, best: r.bestMove, bestLine: r.bestLine, bestScore: r.score, prep: true };
   }
   return {
     fen: m.fen,
@@ -46,6 +48,7 @@ export function cardSpec(m: Mistake): CardSpec {
     lastMove: m.path[m.path.length - 1],
     best: m.bestMove,
     bestLine: m.bestLine,
+    bestScore: m.scoreBest,
     habit: m.move,
     habitLine: m.playedLine,
     prep: false,

@@ -7,6 +7,11 @@ import { PRIVACY_TEXT } from './Onboarding';
 
 export const SOURCE_URL = 'https://github.com/SMANahian/chess-analyzer';
 const NOTICES_URL = `${SOURCE_URL}/blob/HEAD/THIRD_PARTY_NOTICES.md`;
+/** Licence texts shipped with the app (next to index.html), so they are available offline and match the build. */
+export const SHIPPED_LICENSES = 'THIRD-PARTY-LICENSES.md';
+export const ENGINE_LICENSE = 'engine/COPYING.txt';
+/** A file shipped with the build, relative to the app's base (works under any sub-path). */
+export const shippedUrl = (path: string, base: string = import.meta.env.BASE_URL): string => `${base.endsWith('/') ? base : `${base}/`}${path}`;
 
 function Ext({ href: url, children }: { href: string; children: ComponentChildren }): JSX.Element {
   return (
@@ -140,6 +145,10 @@ export default function About(_props: PageProps): JSX.Element {
           <p>
             Because it bundles GPL components, the app as a whole is distributed under GPL-3.0 terms. Full list:{' '}
             <Ext href={NOTICES_URL}>THIRD_PARTY_NOTICES</Ext>.
+          </p>
+          <p>
+            Shipped with this copy of the app: <Ext href={shippedUrl(SHIPPED_LICENSES)}>full licence texts of the bundled components</Ext> and{' '}
+            <Ext href={shippedUrl(ENGINE_LICENSE)}>Stockfish’s licence (GPL-3.0)</Ext>.
           </p>
         </Faq>
 

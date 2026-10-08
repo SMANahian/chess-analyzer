@@ -1,7 +1,7 @@
 // Accessible tabs (WAI-ARIA tablist with roving focus: ←/→/Home/End). Panels are rendered by the caller
 // with <TabPanel>, so pages keep full control of their content.
 import type { ComponentChildren, JSX } from 'preact';
-import { useRef } from 'preact/hooks';
+import { useEffect, useRef } from 'preact/hooks';
 
 export interface TabItem<T extends string> {
   id: T;
@@ -23,8 +23,29 @@ export interface TabsProps<T extends string> {
 const tabId = (prefix: string, id: string): string => `${prefix}-tab-${id}`;
 const panelId = (prefix: string, id: string): string => `${prefix}-panel-${id}`;
 
+/** Marks a scrolling tablist that has more tabs out of view (CSS fades that edge). */
+function useOverflowHint(ref: { current: HTMLElement | null }): void {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = (): void => {
+      el.classList.toggle('has-more-start', el.scrollLeft > 1);
+      el.classList.toggle('has-more-end', el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+    };
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
+    ro?.observe(el);
+    return () => {
+      el.removeEventListener('scroll', update);
+      ro?.disconnect();
+    };
+  });
+}
+
 export function Tabs<T extends string>({ items, value, onChange, label, idPrefix = 'tabs' }: TabsProps<T>): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null);
+  useOverflowHint(listRef);
   const onKeyDown = (e: KeyboardEvent): void => {
     const i = items.findIndex(t => t.id === value);
     const next =

@@ -14,7 +14,9 @@ import { ProgressCard } from '../components/ProgressCard';
 import { SEVERITY_GLYPH } from '../components/SeverityPill';
 import { Spinner } from '../components/Spinner';
 import { Stat, StatGrid } from '../components/Stat';
+import { safeRead, trainingCountsSafe } from '../components/safe';
 import { recordVisit } from '../components/visits';
+import { sessionCounts } from '../../services/training';
 import { href, type PageProps } from '../router';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -42,7 +44,7 @@ export default function Dashboard(_props: PageProps): JSX.Element {
           <SinceLastVisit now={now} />
         </div>
       </div>
-      <DashStats visible={visible} />
+      <DashStats visible={visible} analyzing={busy && firstRun} />
     </div>
   );
 }
@@ -278,28 +280,67 @@ export function nextDue(reviews: Iterable<ReviewState>, now: number): number | u
   return next;
 }
 
+export interface TrainCardView {
+  /** '5 reviews due · 5 new positions', or when to come back. */
+  line: string;
+  /** The button label, when there is something to train. */
+  cta?: string;
+}
+
+/**
+ * The Training card's copy. `upcoming` = the next review's due time; `newLater` = unseen positions
+ * wait for a later day (today's new cards are used up).
+ */
+export function trainCardView(c: store.TrainingCounts, opts: { upcoming?: number; newLater: boolean; now: number }): TrainCardView {
+  if (c.total > 0) {
+    const parts = [c.dueReviews > 0 ? `${plural(c.dueReviews, 'review')} due` : '', c.newAvailable > 0 ? plural(c.newAvailable, 'new position') : ''];
+    return { line: parts.filter(Boolean).join(' · '), cta: `Train now (${formatCount(c.total)})` };
+  }
+  const next =
+    opts.upcoming === undefined ? ''
+    : opts.upcoming - opts.now < 60_000 ? 'next review in a moment'
+    : `next review ${relativeTime(opts.upcoming, opts.now)}`;
+  const when = [next, opts.newLater ? 'new positions tomorrow' : ''].filter(Boolean);
+  return { line: `Nothing to train right now${when.length > 0 ? ` — ${when.join('; ')}` : ''}.` };
+}
+
+/** Positions never trained that training would offer (default filters), ignoring today's limit. */
+function unseenPositions(now: number): number {
+  return safeRead(
+    () => sessionCounts(store.mistakes.value, store.reviews.value, now, { newToday: 0, newPerDay: Number.MAX_SAFE_INTEGER }).newAvailable,
+    0,
+  );
+}
+
 function TrainCard({ visibleCount, now }: { visibleCount: number; now: number }): JSX.Element | null {
-  const due = store.dueCount.value;
+  const counts = trainingCountsSafe();
   const reviews = store.reviews.value;
-  if (visibleCount === 0 && due === 0) return null;
-  const upcoming = due === 0 ? nextDue(reviews.values(), now) : undefined;
+  const mistakes = store.mistakes.value;
+  const nothing = counts.total === 0;
+  // Only needed (one filter pass) when nothing is left for today.
+  const unseen = useMemo(() => (nothing ? unseenPositions(now) : 0), [nothing, mistakes, reviews, now]);
+  if (visibleCount === 0 && nothing) return null;
+  const view = trainCardView(counts, {
+    upcoming: nothing ? nextDue(reviews.values(), now) : undefined,
+    newLater: nothing && unseen > 0 && store.settings.value.newPerDay > 0,
+    now,
+  });
   return (
     <section class="card train-card" aria-labelledby="train-title">
       <h2 id="train-title">Training</h2>
-      {due > 0 ? (
-        <p class="muted">
-          <strong class="train-due num">{plural(due, 'position')}</strong>{' '}
-          {reviews.size === 0 ? 'ready to learn.' : 'due for review.'}
+      {view.cta ? (
+        <p>
+          <strong class="train-due num">{view.line}</strong>
         </p>
       ) : (
-        <p class="muted">
-          Nothing due right now{upcoming ? ` — next review ${relativeTime(upcoming, now)}` : ''}. Learn new positions any time.
-        </p>
+        <p class="muted">{view.line}</p>
       )}
-      <a class={`btn btn-block ${due > 0 ? 'btn-primary btn-lg' : ''}`} href={href('train')}>
-        <Icon name="play" size={18} />
-        {due > 0 ? `Train now (${formatCount(due)} due)` : 'Train new positions'}
-      </a>
+      {view.cta ? (
+        <a class="btn btn-block btn-primary btn-lg" href={href('train')}>
+          <Icon name="play" size={18} />
+          {view.cta}
+        </a>
+      ) : null}
     </section>
   );
 }
@@ -387,8 +428,9 @@ export function gameBreakdown(games: readonly StoredGame[]): { white: number; bl
 const SEVERITIES: readonly Severity[] = ['blunder', 'mistake', 'inaccuracy'];
 const SEVERITY_PLURAL: Readonly<Record<Severity, string>> = { blunder: 'blunders', mistake: 'mistakes', inaccuracy: 'inaccuracies' };
 
-function DashStats({ visible }: { visible: readonly ViewMistake[] }): JSX.Element | null {
+function DashStats({ visible, analyzing }: { visible: readonly ViewMistake[]; analyzing: boolean }): JSX.Element | null {
   const games = store.games.value;
+  const counts = trainingCountsSafe();
   const all = store.mistakes.value;
   const breakdown = useMemo(() => gameBreakdown(games), [games]);
   if (games.length === 0) return null;
@@ -422,15 +464,21 @@ function DashStats({ visible }: { visible: readonly ViewMistake[] }): JSX.Elemen
             bySeverity
               .filter(([, n]) => n > 0)
               .map(([s, n]) => `${n} ${SEVERITY_GLYPH[s]} ${n === 1 ? s : SEVERITY_PLURAL[s]}`)
-              .join(' · ') || 'None under the current filters'
+              .join(' · ') || (analyzing ? 'Analyzing…' : 'None under the current filters')
           }
         />
         <Stat label="Fixed in real games" value={formatCount(fixed)} tone={fixed > 0 ? 'good' : 'neutral'} detail="Last time, you found a good move" />
         <Stat
           label="Due for review"
-          value={formatCount(store.dueCount.value)}
+          value={formatCount(counts.dueReviews)}
           href={href('train')}
-          detail={store.reviews.value.size > 0 ? `${plural(store.reviews.value.size, 'position')} in training` : 'New positions, ready to learn'}
+          detail={
+            counts.newAvailable > 0
+              ? `${formatCount(counts.newAvailable)} new today`
+              : store.reviews.value.size > 0
+                ? `${plural(store.reviews.value.size, 'position')} in training`
+                : 'No positions in training yet'
+          }
         />
       </StatGrid>
     </section>

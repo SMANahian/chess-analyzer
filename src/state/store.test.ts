@@ -9,7 +9,18 @@ import * as repo from '../db/repo';
 import { useTestDb } from '../db/schema';
 import { setLichessCooldown } from '../sources/http';
 import { fixture } from '../sources/__fixtures__/testing';
-import { FakeChesscom, FakeLichess, FakePool, combinedFetch, lichessHistory, storedGame, type ScoreTable } from '../services/__fixtures__/fakes';
+import {
+  FakeChesscom,
+  FakeLichess,
+  FakePool,
+  combinedFetch,
+  lichessHistory,
+  lichessLine,
+  storedGame,
+  testMistake,
+  type ScoreTable,
+} from '../services/__fixtures__/fakes';
+import { buildSession } from '../services/training';
 import * as store from './store';
 
 const NOW = Date.UTC(2026, 9, 8, 12);
@@ -50,6 +61,28 @@ async function setupHero(): Promise<void> {
   await store.init();
   await store.setupSelf([HERO]);
   await store.__jobsIdle();
+}
+
+/** New games for hero (White) in the English, 1.c4 e5 2.Nc3: positions the engine has not seen yet. */
+function englishGames(n: number): Record<string, unknown>[] {
+  return Array.from({ length: n }, (_, i) =>
+    lichessLine({ id: `en${String(i).padStart(6, '0')}`, createdAt: NOW - DAY / 2 + i * 60_000, white: 'hero', black: `x${i}`, moves: 'c4 e5 Nc3 Nf6 g3 d5' }),
+  );
+}
+
+/** Calls `action` once, as soon as an analysis reports the given phase; returns the action's promise. */
+function onAnalysisPhase(phase: string, action: () => Promise<unknown>): { started(): Promise<unknown>; stop(): void } {
+  let promise: Promise<unknown> | undefined;
+  const stop = store.analysisProgress.subscribe(p => {
+    if (p?.phase === phase && promise === undefined) promise = action();
+  });
+  return {
+    started: async () => {
+      await vi.waitFor(() => expect(promise).toBeDefined(), { timeout: 5000 });
+      return promise;
+    },
+    stop,
+  };
 }
 
 describe('init', () => {
@@ -265,6 +298,92 @@ describe('setupSelf and refresh', () => {
     expect(await repo.getSyncStates(store.selfProfile.value!.id)).toHaveLength(1);
   });
 
+  it('an account added while a refresh runs is downloaded: that refresh read the old accounts, so a new one replaces it', async () => {
+    const cc = new FakeChesscom('HeroCC');
+    cc.addMonth(2026, 10, 4, 1);
+    store.__setTestDeps({ fetchImpl: combinedFetch({ lichess, chesscom: cc }), pool, book, now: () => NOW });
+    await setupHero();
+    // New games, so the next refresh has engine work; the user adds an account in Settings meanwhile.
+    lichess.games = [...lichess.games, ...englishGames(4)];
+    pool.delayMs = 30;
+    const change = onAnalysisPhase('evaluating', () => store.updateSelfAccounts([HERO, { platform: 'chesscom', username: 'HeroCC' }]));
+    const running = store.refresh().catch((err: unknown) => err);
+    await change.started();
+    change.stop();
+    // The running refresh was stopped (an abort, which the UI does not report)…
+    expect(await running).toMatchObject({ name: 'AbortError' });
+    await store.__jobsIdle();
+    // …and the one updateSelfAccounts started synced both accounts and analysed.
+    expect(cc.requests.some(u => u.endsWith('/games/archives'))).toBe(true);
+    expect(store.games.value.filter(g => g.platform === 'chesscom')).toHaveLength(4);
+    expect((await repo.getSyncStates(store.selfProfile.value!.id)).map(s => s.platform).sort()).toEqual(['chesscom', 'lichess']);
+    expect(store.analysisProgress.value).toMatchObject({ phase: 'done', gamesUsed: store.games.value.length });
+  });
+
+  it('an account added while a re-analysis runs lets it finish (only a refresh read the accounts), then syncs it', async () => {
+    const cc = new FakeChesscom('HeroCC');
+    cc.addMonth(2026, 10, 4, 1);
+    store.__setTestDeps({ fetchImpl: combinedFetch({ lichess, chesscom: cc }), pool, book, now: () => NOW });
+    await setupHero();
+    await store.updateSettings({ openingPlies: 16 });
+    pool.delayMs = 30;
+    const phases: string[] = [];
+    const stop = store.analysisProgress.subscribe(p => p && phases.push(p.phase));
+    const change = onAnalysisPhase('evaluating', () => store.updateSelfAccounts([HERO, { platform: 'chesscom', username: 'HeroCC' }]));
+    await store.analyze();
+    await change.started();
+    change.stop();
+    await store.__jobsIdle();
+    stop();
+    expect(phases).not.toContain('cancelled');
+    expect(store.games.value.filter(g => g.platform === 'chesscom')).toHaveLength(4);
+  });
+
+  it('replacing the only account with one that has no games yet removes the old leaks (reviewed ones stay, dormant)', async () => {
+    await setupHero();
+    const id = store.selfProfile.value!.id;
+    // Two leaks of the old (mistyped) account: c6d4 was trained, the other one never.
+    const [card] = await store.startSession();
+    await store.gradeCard(card!, 'good');
+    await repo.upsertMistakes([testMistake(id, fenAt('e4'), 'f7f6')]);
+    const fresh = new FakeLichess([]);
+    store.__setTestDeps({ fetchImpl: fresh.fetchImpl, pool, book, now: () => NOW });
+    await store.updateSelfAccounts([{ platform: 'lichess', username: 'newbie' }]);
+    await store.__jobsIdle();
+
+    expect(await repo.countGames(id)).toBe(0);
+    expect(store.visibleMistakes.value).toEqual([]);
+    expect(store.trainingCounts.value.total).toBe(0);
+    expect((await repo.getMistakes(id)).map(m => [m.move, m.dormant])).toEqual([['c6d4', true]]);
+    expect(store.reviews.value.size).toBe(1);
+    // Starts over as never analysed: the new account's first refresh is a quick first pass.
+    expect(store.selfProfile.value).toMatchObject({ name: 'newbie', accounts: [{ platform: 'lichess', username: 'newbie' }] });
+    expect(store.selfProfile.value!.lastAnalysisAt).toBeUndefined();
+    expect(fresh.requests.find(u => u.pathname.startsWith('/api/games/user/'))?.searchParams.get('max')).toBe('300');
+  });
+
+  it('a settings change made while an analysis runs is not recorded as applied: the next refresh applies it', async () => {
+    // 4...Nd4 looks bad up to depth 14 but is fine at depth 18 (the Thorough confirm depth).
+    pool = new FakePool(2, { [keyOf(AFTER_BC4)]: { c6d4: (d: number) => (d >= 18 ? 30 : -150), f8c5: 30 } });
+    store.__setTestDeps({ fetchImpl: lichess.fetchImpl, pool, book, now: () => NOW });
+    await setupHero();
+    expect(store.mistakes.value.map(m => m.move)).toEqual(['c6d4']);
+    lichess.games = [...lichess.games, ...englishGames(4)];
+    pool.delayMs = 30;
+    // The user picks Thorough while the refresh's analysis (Standard, 10 → 14) runs.
+    const change = onAnalysisPhase('evaluating', () => store.updateSettings({ preset: 'thorough' }));
+    await store.refresh();
+    await change.started();
+    change.stop();
+    expect(pool.calls.some(c => c.depth === 18)).toBe(false);
+    expect(store.settings.value.preset).toBe('thorough');
+
+    pool.delayMs = 0;
+    await store.refresh();
+    expect(pool.calls.some(c => c.depth === 18)).toBe(true);
+    expect(store.visibleMistakes.value).toEqual([]);
+  });
+
   it('cancelJobs stops a running analysis and keeps what was found', async () => {
     await store.init();
     pool.delayMs = 30;
@@ -283,6 +402,39 @@ describe('setupSelf and refresh', () => {
     lichess.requests.length = 0;
     await Promise.all([store.refresh(), store.refresh()]);
     expect(lichess.requests.filter(u => u.searchParams.get('sort') === 'dateAsc')).toHaveLength(1);
+  });
+});
+
+describe('mistakes found while an analysis runs', () => {
+  it('reach the signal at most once per MISTAKES_MERGE_MS (not every write batch); the end state equals the database', async () => {
+    // Hero (Black) answers each of 20 first moves with 1...a6, twice: 20 positions, each a leak.
+    const firsts = ['a3', 'a4', 'b3', 'b4', 'c3', 'c4', 'd3', 'd4', 'e3', 'e4', 'f3', 'f4', 'g3', 'g4', 'h3', 'h4', 'Na3', 'Nc3', 'Nf3', 'Nh3'];
+    const table: ScoreTable = Object.fromEntries(firsts.map(f => [keyOf(fenAt(f)), { a7a6: -150, e7e6: 30 }]));
+    const self = await repo.ensureSelfProfile({ name: 'hero', accounts: [], aliases: [] }, NOW);
+    await repo.addGames(firsts.flatMap((f, i) => [0, 1].map(j => storedGame(self.id, `g${i}-${j}`, `${f} a6`, 'black', NOW - (2 * i + j) * 3_600_000))));
+    // One engine, 40 ms per search, two searches per position: a run of about 1.6 s.
+    pool = new FakePool(1, table);
+    pool.delayMs = 40;
+    store.__setTestDeps({ fetchImpl: lichess.fetchImpl, pool, book, now: () => NOW });
+    await store.init();
+
+    const writes = vi.spyOn(repo, 'upsertMistakes');
+    const merges: number[] = [];
+    const stop = store.mistakes.subscribe(() => {
+      if (store.analysisProgress.value?.phase === 'evaluating') merges.push(performance.now());
+    });
+    await store.analyze();
+    stop();
+
+    // The database got a batch every FLUSH_MS (300 ms); the signal far fewer updates, a second apart.
+    const batches = writes.mock.calls.length;
+    expect(batches).toBeGreaterThanOrEqual(4);
+    expect(merges.length).toBeGreaterThanOrEqual(1);
+    expect(merges.length).toBeLessThan(batches);
+    for (let i = 1; i < merges.length; i++) expect(merges[i]! - merges[i - 1]!).toBeGreaterThanOrEqual(store.MISTAKES_MERGE_MS - 20);
+    // The end of the run reloads what was stored.
+    expect(store.mistakes.value).toHaveLength(20);
+    expect(store.mistakes.value).toEqual(await repo.getMistakes(self.id));
   });
 });
 
@@ -352,6 +504,35 @@ describe('training', () => {
     await store.updateSettings({ newPerDay: 0 });
     expect(await store.startSession()).toEqual([]);
     expect(store.dueCount.value).toBe(0);
+  });
+
+  it('trainingCounts tells due reviews from new positions available today (the example data)', async () => {
+    const demo = readFileSync(new URL('../../public/demo/demo.json', import.meta.url), 'utf8');
+    // Two days after the example was made: every review is due, and no card was started "today" in any time zone.
+    const at = (JSON.parse(demo) as { exportedAt: number }).exportedAt + 2 * DAY;
+    store.__setTestDeps({ fetchImpl: lichess.fetchImpl, pool, book, now: () => at });
+    await store.init();
+    await store.importData(new Blob([demo]));
+    const unlimited = (newToday: number): number =>
+      buildSession(store.mistakes.value, [...store.reviews.value.values()], at, { size: Number.MAX_SAFE_INTEGER, newToday, newPerDay: 5 }).length;
+
+    expect(store.settings.value.newPerDay).toBe(5);
+    expect(store.trainingCounts.value).toEqual({ dueReviews: 6, newAvailable: 5, total: 11 });
+    expect(store.trainingCounts.value.total).toBe(unlimited(0));
+    expect(store.dueCount.value).toBe(11);
+
+    // Today's five new cards are started: only the reviews are left.
+    const unseen = store.visibleMistakes.value.filter(m => !store.reviews.value.has(m.id)).slice(0, 5);
+    for (const m of unseen) await repo.addAttempt({ mistakeId: m.id, profileId: m.profileId, at, grade: 'good' });
+    await store.startSession(); // reloads today's new-card count
+    expect(store.trainingCounts.value).toEqual({ dueReviews: 6, newAvailable: 0, total: 6 });
+    expect(store.trainingCounts.value.total).toBe(unlimited(5));
+
+    // A review graded now is due again later.
+    const [card] = await store.startSession();
+    expect(card!.isNew).toBe(false);
+    await store.gradeCard(card!, 'good');
+    expect(store.trainingCounts.value).toEqual({ dueReviews: 5, newAvailable: 0, total: 5 });
   });
 
   it('practiceStats: attempts per local day and the current streak', async () => {
@@ -461,6 +642,26 @@ describe('data', () => {
     expect(store.mistakes.value.map(m => m.id)).toEqual(mistakeIds);
     expect(store.notice.value).toMatchObject({ kind: 'success' });
     await expect(store.importData(new Blob(['not json']))).rejects.toThrow(/not valid JSON/);
+  });
+
+  it('a backup restored on another device keeps that device’s storage state, so persistence is requested there', async () => {
+    // Device A: storage is persistent.
+    await setupHero();
+    await store.updateSettings({ storagePersisted: true });
+    const blob = await store.exportData();
+    // Device B: a fresh browser whose storage is not persistent yet.
+    await store.__resetForTests();
+    useTestDb();
+    const persist = vi.fn(async () => true);
+    vi.stubGlobal('navigator', { storage: { persisted: async () => false, persist } });
+    store.__setTestDeps({ fetchImpl: lichess.fetchImpl, pool, book, now: () => NOW });
+    await store.init();
+    await store.importData(blob);
+    expect(store.selfProfile.value!.name).toBe('Hero');
+    expect(store.settings.value.storagePersisted).toBeUndefined();
+    await store.analyze();
+    expect(persist).toHaveBeenCalledTimes(1);
+    expect(store.settings.value.storagePersisted).toBe(true);
   });
 
   it('exports the visible mistakes as PGN', async () => {

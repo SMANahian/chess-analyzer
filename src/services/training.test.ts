@@ -6,7 +6,7 @@ import * as repo from '../db/repo';
 import { useTestDb } from '../db/schema';
 import { ENGINE_ID } from '../engine/engine';
 import { FakePool, testMistake } from './__fixtures__/fakes';
-import { buildSession, evaluateTrainingMove, judgeMove, judgeRefutationMove, recordGrade } from './training';
+import { buildSession, evaluateTrainingMove, judgeMove, judgeRefutationMove, recordGrade, sessionCounts } from './training';
 
 const NOW = Date.UTC(2026, 9, 8, 12);
 const DAY = 86_400_000;
@@ -96,6 +96,43 @@ describe('buildSession', () => {
     const grandchild = leak('c7c6', 60, { dependsOn: child.id, ply: 9 });
     const cards = buildSession([grandchild, child, parent], [], NOW, { size: 5, newToday: 0, newPerDay: 5 });
     expect(cards.map(c => c.mistake.move)).toEqual(['a7a6', 'b7b6', 'c7c6']);
+  });
+});
+
+describe('sessionCounts', () => {
+  const unlimited = (ms: Mistake[], rs: ReviewState[], opts: { newToday: number; newPerDay: number; filters?: { showLowConfidence: boolean } }): number =>
+    buildSession(ms, rs, NOW, { size: Number.MAX_SAFE_INTEGER, ...opts }).length;
+
+  it('tells due reviews from the new cards still allowed today; the total is an unlimited session', () => {
+    const dueA = leak('a7a6', 1);
+    const dueB = leak('b7b6', 1);
+    const later = leak('g7g6', 50);
+    const fresh = [leak('h7h6', 40), leak('f7f6', 20), leak('g7g5', 10)];
+    const hidden = [leak('c7c6', 1, { status: 'mastered' }), leak('d7d6', 1, { dormant: true }), leak('e7e6', 1, { kind: 'book' })];
+    const ms = [dueA, dueB, later, ...fresh, ...hidden];
+    // A review of a hidden item (mastered) is not due training.
+    const reviews = [review(dueA, NOW - 1000), review(dueB, NOW), review(later, NOW + DAY), review(hidden[0]!, NOW - DAY)];
+    for (const [newToday, newPerDay, newAvailable] of [
+      [0, 5, 3],
+      [1, 3, 2],
+      [3, 3, 0],
+      [5, 3, 0],
+    ] as const) {
+      const counts = sessionCounts(ms, reviews, NOW, { newToday, newPerDay });
+      expect(counts).toEqual({ dueReviews: 2, newAvailable, total: 2 + newAvailable });
+      expect(counts.total).toBe(unlimited(ms, reviews, { newToday, newPerDay }));
+      // A Map of reviews (as the store keeps them) gives the same counts.
+      expect(sessionCounts(ms, new Map(reviews.map(r => [r.mistakeId, r])), NOW, { newToday, newPerDay })).toEqual(counts);
+    }
+  });
+
+  it('applies the same filters as buildSession', () => {
+    const low = leak('f7f6', 1, { confidence: 'low', winLoss: 6, severity: 'inaccuracy' });
+    const ms = [leak('a7a6', 1), low];
+    expect(sessionCounts(ms, [], NOW, { newToday: 0, newPerDay: 5 })).toMatchObject({ newAvailable: 1 });
+    const filters = { showLowConfidence: true };
+    expect(sessionCounts(ms, [], NOW, { newToday: 0, newPerDay: 5, filters })).toMatchObject({ newAvailable: 2 });
+    expect(sessionCounts(ms, [], NOW, { newToday: 0, newPerDay: 5, filters }).total).toBe(unlimited(ms, [], { newToday: 0, newPerDay: 5, filters }));
   });
 });
 

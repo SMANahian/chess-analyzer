@@ -8,17 +8,18 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import * as store from '../../state/store';
 import { playUci } from '../../core/chess';
 import type { Mistake, MoveVerdict, ReviewState, SessionCard } from '../../core/types';
-import { describeLoss } from '../../core/winrate';
 import { Board, arrowFromUci, type BoardArrow, type BoardController, type Replay } from '../components/Board';
 import { EmptyState } from '../components/EmptyState';
-import { colorName, moveLabel, plural, relativeTime } from '../components/format';
-import { isShortcut } from '../components/gestures';
+import { colorName, describePawnDrop, moveLabel, plural, relativeTime } from '../components/format';
+import { isKeyShortcut } from '../components/gestures';
 import { prefersReducedMotion, toast, useNow } from '../components/hooks';
 import { Icon } from '../components/Icon';
-import { habitLabel, lastMoveLabel, lineMoves, punishmentOf, punishmentText } from '../components/leakView';
+import { focusIfIdle, shortcutsOn, usedKeyboardLast } from '../components/keyboard';
+import { habitLabel, lastMoveLabel, lineMoves, movesSoFar, punishmentOf, punishmentText } from '../components/leakView';
 import { LineView } from '../components/LineView';
 import { MoveInput } from '../components/MoveInput';
 import { ProgressCard } from '../components/ProgressCard';
+import { trainingCountsSafe } from '../components/safe';
 import { SkeletonBoard } from '../components/Skeleton';
 import { Spinner } from '../components/Spinner';
 import {
@@ -292,6 +293,8 @@ function CardView({ card, graded, last, onFinished, onNext }: { card: SessionCar
   const replay = useRef<Replay | null>(null);
   const abort = useRef<AbortController | null>(null);
   const nextButton = useRef<HTMLButtonElement>(null);
+  const moveInput = useRef<HTMLInputElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<Phase>('replay');
   const [attempt, setAttempt] = useState<Attempt>(NEW_ATTEMPT);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -330,8 +333,15 @@ function CardView({ card, graded, last, onFinished, onNext }: { card: SessionCar
   }, [refute]);
 
   useEffect(() => () => abort.current?.abort(), []);
+  // Keyboard flow: the move input when a move is asked for again (after the replay, after "Try
+  // again"), the Next button when the card is done. The input only for keyboard users (on a phone it
+  // would open the on-screen keyboard), and only when focus is not somewhere else on the page.
+  const previousPhase = useRef<Phase>('replay');
   useEffect(() => {
+    const before = previousPhase.current;
+    previousPhase.current = phase;
     if (phase === 'finished') nextButton.current?.focus({ preventScroll: true });
+    else if (phase === 'move' && before !== 'move' && usedKeyboardLast()) focusIfIdle(moveInput.current, panel.current);
   }, [phase]);
 
   const finish = (a: Attempt): void => {
@@ -411,7 +421,8 @@ function CardView({ card, graded, last, onFinished, onNext }: { card: SessionCar
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (!isShortcut(e)) return;
+      // Space (skip the replay) and h (hint) are single-key shortcuts: off when the user turned them off.
+      if (!isKeyShortcut(e, shortcutsOn.value)) return;
       const onButton = e.target instanceof Element && e.target.closest('button, a');
       if (e.key === ' ' && phase === 'replay' && !onButton) replay.current?.skip();
       else if (e.key === 'h' && phase === 'move') takeHint();
@@ -436,9 +447,13 @@ function CardView({ card, graded, last, onFinished, onNext }: { card: SessionCar
           controller={ctl}
           onMove={uci => void submit(uci)}
           label={`Training position. You are ${colorName(spec.userColor)}${spec.lastMove ? `; your opponent just played ${lastMoveLabel(spec.path) ?? ''}` : ''}.`}
+          describedBy={`train-moves-${m.shortId}`}
         />
+        <p id={`train-moves-${m.shortId}`} class="sr-only">
+          {movesSoFar(spec.path)}
+        </p>
       </div>
-      <div class="train-panel">
+      <div class="train-panel" ref={panel}>
         <CardMeta card={card} spec={spec} graded={graded} />
         <div class="train-feedback" aria-live="polite">
           <PanelBody
@@ -464,7 +479,15 @@ function CardView({ card, graded, last, onFinished, onNext }: { card: SessionCar
           </button>
         ) : (
           <div class="train-controls">
-            <MoveInput fen={spec.fen} onSubmit={uci => void submit(uci)} disabled={phase !== 'move'} label="Or type your move" placeholder="e.g. Nf6, O-O" />
+            <MoveInput
+              fen={spec.fen}
+              onSubmit={uci => void submit(uci)}
+              readOnly={phase !== 'move'}
+              busy={phase === 'checking' || phase === 'refuting'}
+              inputRef={moveInput}
+              label="Or type your move"
+              placeholder="e.g. Nf6, O-O"
+            />
             <div class="train-help" hidden={phase !== 'move' && phase !== 'replay'}>
               <button type="button" class="btn btn-ghost btn-sm" onClick={takeHint} disabled={phase !== 'move' || attempt.hints >= 2}>
                 <Icon name="bulb" size={18} /> {attempt.hints === 0 ? 'Hint' : attempt.hints === 1 ? 'Show the move' : 'Hint shown'}
@@ -579,10 +602,13 @@ function PanelBody(p: PanelProps): JSX.Element {
   }
   if (phase === 'retry' && f?.verdict.kind === 'wrong') {
     const loss = f.verdict.loss;
+    // The engine's own pawn figure, only when this move's score is known (a win-% loss alone says
+    // nothing reliable about pawns away from a level position).
+    const pawns = f.verdict.line ? describePawnDrop(spec.bestScore, f.verdict.line.score) : null;
     return (
       <Prompt tone="bad" icon="close" title="Not quite">
         <p>
-          <span class="move">{moveLabel(spec.fen, f.move)}</span> costs about {Math.round(loss)}% winning chances ({describeLoss(loss)}).
+          <span class="move">{moveLabel(spec.fen, f.move)}</span> costs about {Math.round(loss)}% winning chances{pawns ? ` (${pawns})` : ''}.
         </p>
         <RetryButtons attempt={p.attempt} onRetry={p.onRetry} onShowAnswer={p.onShowAnswer} />
       </Prompt>
@@ -593,17 +619,27 @@ function PanelBody(p: PanelProps): JSX.Element {
 
 function RetryButtons({ attempt, onRetry, onShowAnswer }: { attempt: Attempt; onRetry(): void; onShowAnswer(): void }): JSX.Element {
   const lastTry = attempt.failures >= 2;
+  const primary = useRef<HTMLButtonElement>(null);
+  // The verdict is in: "Try again" takes focus (unless the user is busy elsewhere on the page).
+  useEffect(() => {
+    focusIfIdle(primary.current, primary.current?.closest('.train-page'));
+  }, []);
   return (
-    <div class="train-actions">
-      <button type="button" class="btn btn-primary" onClick={onRetry}>
-        {lastTry ? 'Show the answer' : 'Try again'}
-      </button>
-      {lastTry ? null : (
-        <button type="button" class="btn btn-ghost" onClick={onShowAnswer}>
-          Show answer
+    <>
+      <div class="train-actions">
+        <button type="button" class="btn btn-primary" ref={primary} onClick={onRetry}>
+          {lastTry ? 'Show the answer' : 'Try again'}
         </button>
-      )}
-    </div>
+        {lastTry ? null : (
+          <button type="button" class="btn btn-ghost" onClick={onShowAnswer}>
+            Show answer
+          </button>
+        )}
+      </div>
+      <p class="tiny faint kbd-hint">
+        <kbd>Enter</kbd> = {lastTry ? 'show the answer' : 'try again'}
+      </p>
+    </>
   );
 }
 
@@ -718,7 +754,7 @@ function Summary({ session, mode, results, onAgain, onPractice }: { session: Ses
       .catch(() => undefined);
   }, []);
   const solved = results.filter(r => cleanSolve(r.attempt)).length;
-  const due = store.dueCount.value;
+  const due = trainingCountsSafe().total;
   const upcoming = nextDue(store.reviews.value.values(), now);
   const back = mode.kind === 'scout' ? href('scout', mode.profileId) : href('leaks');
   return (
@@ -755,7 +791,7 @@ function Summary({ session, mode, results, onAgain, onPractice }: { session: Ses
         <p class="small muted">
           {session.practice ? 'Practice doesn’t change your review schedule. ' : ''}
           {mode.kind === 'due' && due > 0
-            ? `${plural(due, 'more card')} ${due === 1 ? 'is' : 'are'} due now.`
+            ? `${plural(due, 'more card')} to train now.`
             : upcoming !== undefined && upcoming - now < 60_000
               ? 'Another card is due in a moment.'
               : upcoming

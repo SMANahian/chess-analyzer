@@ -95,6 +95,17 @@ a:hover {
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
+/* Inside clipping containers (scroll panes, bordered button groups) the ring is drawn inside. */
+.ld-action-grid .btn:focus-visible,
+.tabs .tab:focus-visible,
+.leaks-list .li-row:focus-visible {
+  outline-offset: -3px;
+}
+
+/* Keyboard focus never lands under the sticky header (or, on phones, the bottom tab bar). */
+html {
+  scroll-padding-top: calc(var(--header-h) + 8px);
+}
 :focus:not(:focus-visible) {
   outline: none;
 }
@@ -174,7 +185,7 @@ a:hover {
   --btn-border: transparent;
 }
 .btn-primary:hover {
-  --btn-bg: color-mix(in srgb, var(--accent-strong) 88%, white);
+  --btn-bg: color-mix(in srgb, var(--accent-strong) 85%, black);
 }
 .btn-ghost {
   --btn-bg: transparent;

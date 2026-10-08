@@ -1,9 +1,10 @@
 // Toasts. <NoticeHost/> (mounted once by the app) shows store.notice; pages raise one with
 // toast(kind, text, action?) from hooks.ts, e.g. toast('success', 'Snoozed for 30 days', { label: 'Undo', run: undo }).
 // <Banner/> is the inline (in-page) variant for persistent messages.
-import type { ComponentChildren, JSX } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import type { ComponentChildren, JSX, Ref } from 'preact';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import * as store from '../../state/store';
+import { toastFocusOf } from './hooks';
 import { Icon, type IconName } from './Icon';
 
 const ICONS: Readonly<Record<store.Notice['kind'], IconName>> = { info: 'about', success: 'check', error: 'alert' };
@@ -18,13 +19,13 @@ export interface ToastViewProps {
 }
 
 /** Presentational toast (also used for the "update available" prompt). */
-export function ToastView({ kind, children, action, onClose }: ToastViewProps): JSX.Element {
+export function ToastView({ kind, children, action, onClose, actionRef }: ToastViewProps & { actionRef?: Ref<HTMLButtonElement> }): JSX.Element {
   return (
     <div class={`toast toast-${kind}`} role={kind === 'error' ? 'alert' : 'status'}>
       <Icon name={ICONS[kind]} class="toast-icon" />
       <div class="toast-text">{children}</div>
       {action ? (
-        <button type="button" class="btn btn-sm toast-action" onClick={() => action.run()}>
+        <button type="button" class="btn btn-sm toast-action" ref={actionRef} onClick={() => action.run()}>
           {action.label}
         </button>
       ) : null}
@@ -37,34 +38,54 @@ export function ToastView({ kind, children, action, onClose }: ToastViewProps): 
   );
 }
 
-/** Toast area; `children` are extra toasts shown above the store notice (e.g. the update prompt). */
+/**
+ * Toast area; `children` are extra toasts shown above the store notice (e.g. the update prompt).
+ * Auto-hide pauses while the pointer is over a toast or focus is in one. A toast raised from the
+ * keyboard can take focus (toast(…, { focusAction: true })); closing it hands focus back.
+ */
 export function NoticeHost({ children }: { children?: ComponentChildren }): JSX.Element {
   const n = store.notice.value;
-  const [paused, setPaused] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const region = useRef<HTMLDivElement>(null);
+  const actionButton = useRef<HTMLButtonElement>(null);
+  const paused = hovered || focused;
   useEffect(() => {
     if (!n || n.kind === 'error' || paused) return;
     const id = setTimeout(() => {
-      if (store.notice.value === n) store.notice.value = null;
+      if (store.notice.value === n) close(false);
     }, n.action ? AUTO_HIDE_MS.withAction : AUTO_HIDE_MS.plain);
     return () => clearTimeout(id);
   }, [n, paused]);
-  const close = (): void => {
+  useEffect(() => {
+    if (n && toastFocusOf(n)?.focusAction) actionButton.current?.focus();
+  }, [n]);
+  /** Closes the store notice; when it held focus, focus goes back to the page instead of <body>. */
+  const close = (byUser = true): void => {
+    const current = store.notice.value;
+    const hadFocus = !!region.current?.contains(document.activeElement);
     store.notice.value = null;
+    setFocused(false);
+    if (!hadFocus || !current) return;
+    const target = toastFocusOf(current)?.returnFocus?.() ?? document.getElementById('main');
+    if (target?.isConnected) target.focus({ preventScroll: !byUser });
   };
   return (
     <div
       class="toast-region"
       aria-live="polite"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-      onFocusIn={() => setPaused(true)}
-      onFocusOut={() => setPaused(false)}
+      ref={region}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocusIn={() => setFocused(true)}
+      onFocusOut={e => setFocused(!!e.relatedTarget && !!region.current?.contains(e.relatedTarget as Node))}
     >
       {children}
       {n ? (
         <ToastView
           kind={n.kind}
-          onClose={close}
+          onClose={() => close()}
+          actionRef={actionButton}
           action={
             n.action
               ? {

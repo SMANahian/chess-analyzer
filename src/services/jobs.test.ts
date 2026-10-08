@@ -1,5 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CHANNEL, JOB_LOCK, broadcastJob, holdWakeLock, isJobLockHeld, onJobBroadcast, requestPersistentStorage, withJobLock, type JobMessage } from './jobs';
+import {
+  CHANNEL,
+  JOB_LOCK,
+  broadcastJob,
+  holdWakeLock,
+  isJobLockHeld,
+  onJobBroadcast,
+  queryJobLock,
+  requestPersistentStorage,
+  withJobLock,
+  type JobMessage,
+} from './jobs';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -61,6 +72,19 @@ describe('withJobLock', () => {
     expect(await isJobLockHeld()).toBe(false);
     vi.stubGlobal('navigator', {});
     expect(await isJobLockHeld()).toBe(false);
+  });
+
+  it('queryJobLock tells "not held" from "cannot tell"', async () => {
+    vi.stubGlobal('navigator', { locks: { query: async () => ({ held: [{ name: JOB_LOCK }] }) } });
+    expect(await queryJobLock()).toBe(true);
+    vi.stubGlobal('navigator', { locks: { query: async () => ({ held: [] }) } });
+    expect(await queryJobLock()).toBe(false);
+    vi.stubGlobal('navigator', { locks: { query: async () => Promise.reject(new Error('blocked')) } });
+    expect(await queryJobLock()).toBeNull();
+    vi.stubGlobal('navigator', { locks: { request: async () => undefined } });
+    expect(await queryJobLock()).toBeNull();
+    vi.stubGlobal('navigator', {});
+    expect(await queryJobLock()).toBeNull();
   });
 
   it('releases the lock when the job fails', async () => {

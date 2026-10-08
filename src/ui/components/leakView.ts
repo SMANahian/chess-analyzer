@@ -1,9 +1,9 @@
 // Pure view-model helpers for the Leaks, Openings and Scout pages: tabs, plain-language headline,
 // "fixed / still playing it" badges, dependency grouping, per-mistake view counts under the filters,
 // date-range options, filter summaries and line formatting. No DOM, no clock (callers pass `now`).
-import { playUci, replay, sanOf } from '../../core/chess';
+import { START_FEN, playUci, replay, sanOf } from '../../core/chess';
 import { impactOf } from '../../core/classify';
-import { explainLine } from '../../core/explain';
+import { explainMistake } from '../../core/explain';
 import { filterOccurrences, meanScore, type OpeningSummaryRow } from '../../core/filters';
 import {
   DEFAULT_FILTERS,
@@ -15,8 +15,9 @@ import {
   type ViewFilters,
   type ViewMistake,
 } from '../../core/types';
-import { describeLoss, scoreForColor } from '../../core/winrate';
-import { ELLIPSIS, colorName, evalWords, moveLabel, speedName } from './format';
+import { scoreForColor } from '../../core/winrate';
+import { ELLIPSIS, colorName, describePawnDrop, evalWords, moveLabel, shortDate, sideToMove, speedName } from './format';
+import type { Cursor } from './LineView';
 import { SEVERITY_GLYPH } from './SeverityPill';
 
 const DAY_MS = 86_400_000;
@@ -65,11 +66,11 @@ export interface Headline {
   n: number;
   /** Rounded win-% points lost, as shown ('12'), or '<1'. */
   lossPct: string;
-  /** '≈1.1 pawns'. */
+  /** The engine's drop from the best move to the habit: '≈1.1 pawns' (see describePawnDrop). */
   pawns: string;
 }
 
-export function headlineOf(m: Pick<Mistake, 'fen' | 'move' | 'bestMove' | 'winLoss'>, k: number, n: number): Headline {
+export function headlineOf(m: Pick<Mistake, 'fen' | 'move' | 'bestMove' | 'winLoss' | 'scoreBest' | 'scorePlayed'>, k: number, n: number): Headline {
   const pct = Math.round(m.winLoss);
   return {
     habit: moveLabel(m.fen, m.move),
@@ -77,7 +78,7 @@ export function headlineOf(m: Pick<Mistake, 'fen' | 'move' | 'bestMove' | 'winLo
     k,
     n,
     lossPct: pct < 1 ? '<1' : String(pct),
-    pawns: describeLoss(m.winLoss),
+    pawns: describePawnDrop(m.scoreBest, m.scorePlayed),
   };
 }
 
@@ -114,6 +115,13 @@ export function outcomeBadge(m: Pick<Mistake, 'lastOutcome' | 'fixedStreak'>): B
   }
 }
 
+/** The status shown on a row of the Mastered / Ignored / Snoozed tab. */
+export function statusBadge(m: Pick<Mistake, 'snoozedUntil' | 'ignoreReason' | 'updatedAt'>, tab: Exclude<LeakTab, 'active'>): Badge {
+  if (tab === 'snoozed') return { tone: 'neutral', text: `Until ${shortDate(m.snoozedUntil ?? 0)}` };
+  if (tab === 'ignored') return { tone: 'neutral', text: m.ignoreReason === 'repertoire' ? 'Your repertoire' : 'Ignored' };
+  return { tone: 'good', text: `Mastered ${shortDate(m.updatedAt)}` };
+}
+
 /** How the game stands from the user's side, as a clause: "you are clearly worse", "the game is about equal". */
 export function standingText(userScore: Score): string {
   if (userScore.mate !== undefined) {
@@ -127,7 +135,7 @@ export function standingText(userScore: Score): string {
 export interface Punishment {
   /** The engine's reply to the habit ('7.Qe2'), when known. */
   reply?: string;
-  /** Material consequence from core/explain ('loses a piece'), or ''. */
+  /** Material the habit loses beyond what the best move loses too (core/explain: 'loses a piece'), or ''. */
   why: string;
   /** Where the game stands after the habit, from the player's side ('you are clearly worse'). */
   standing: string;
@@ -138,15 +146,18 @@ export interface Punishment {
 const userSide = (s: Score, fen: string, user: Color): Score => scoreForColor(s, fen.split(' ')[1] === 'b' ? 'black' : 'white', user);
 const isGoodFor = (s: Score): boolean => (s.mate !== undefined ? s.mate > 0 : (s.cp ?? 0) > 30);
 
-/** Why the habit fails: the refutation, its material consequence and the resulting standing. */
-export function punishmentOf(m: Pick<Mistake, 'fen' | 'move' | 'bestMove' | 'playedLine' | 'scorePlayed' | 'scoreBest' | 'color'>): Punishment {
+/**
+ * Why the habit fails: the refutation, its material consequence judged against the best line (material
+ * the best move gives up as well is not blamed on the habit) and the resulting standing.
+ */
+export function punishmentOf(m: Pick<Mistake, 'fen' | 'move' | 'bestMove' | 'playedLine' | 'bestLine' | 'scorePlayed' | 'scoreBest' | 'color'>): Punishment {
   const line = m.playedLine[0] === m.move ? m.playedLine : [m.move];
   const after = playUci(m.fen, m.move);
   const reply = after && line[1] ? moveLabel(after, line[1]) : '';
   const played = userSide(m.scorePlayed, m.fen, m.color);
   return {
     ...(reply && reply !== line[1] ? { reply } : {}),
-    why: explainLine(m.fen, line, m.scorePlayed),
+    why: explainMistake(m),
     standing: standingText(played),
     ...(isGoodFor(played) ? { instead: { best: moveLabel(m.fen, m.bestMove), standing: standingText(userSide(m.scoreBest, m.fen, m.color)) } } : {}),
   };
@@ -175,6 +186,40 @@ export function lastMoveLabel(path: readonly string[]): string | undefined {
   const steps = replay(path, path.length, true);
   const last = steps[steps.length - 1];
   return last && steps.length === path.length ? moveLabel(last.fen, last.uci) : undefined;
+}
+
+/**
+ * The leak board's accessible name for the position it shows (the cursor of useLineCursor): the move
+ * that led to it, who is to move, and — only at the leak position, where they are drawn — the arrows.
+ */
+export function leakBoardLabel(m: Pick<Mistake, 'fen' | 'path' | 'move' | 'bestMove' | 'bestLine' | 'playedLine'>, cursor: Cursor): string {
+  const toMove = (fen: string): string => `${colorName(sideToMove(fen))} to move.`;
+  if (cursor?.line === 'path') {
+    if (cursor.index < 0) return 'Starting position. White to move.';
+    const steps = replay(m.path, cursor.index + 1, true);
+    const last = steps[cursor.index];
+    const after = last ? playUci(last.fen, last.uci) : undefined;
+    if (last && after) return `Position after ${moveLabel(last.fen, last.uci)}, on the way to the leak. ${toMove(after)}`;
+  } else if (cursor) {
+    const habit = moveLabel(m.fen, m.move);
+    const frames = lineMoves(m.fen, (cursor.line === 'best' ? m.bestLine : m.playedLine).slice(0, cursor.index + 1));
+    const frame = frames[cursor.index];
+    if (frame) {
+      const before = cursor.index === 0 ? m.fen : frames[cursor.index - 1]!.fenAfter;
+      const where = cursor.line === 'best' ? 'in the best line' : `in the line after your ${habit}`;
+      return `Position after ${moveLabel(before, frame.uci)} ${where}. ${toMove(frame.fenAfter)}`;
+    }
+  }
+  return (
+    `Position after ${lastMoveLabel(m.path) ?? 'the start'}. ${toMove(m.fen)} ` +
+    `Orange arrow: your usual ${moveLabel(m.fen, m.move)}. Blue arrow: the best move, ${moveLabel(m.fen, m.bestMove)}.`
+  );
+}
+
+/** "Moves so far: 1.e4 c5 2.Nf3" — the moves leading to a training position, as text for screen readers. */
+export function movesSoFar(path: readonly string[]): string {
+  const text = lineText(START_FEN, path);
+  return text ? `Moves so far: ${text}.` : 'The starting position.';
 }
 
 /** "Black · Italian Game: Two Knights Defense" style subtitle parts. */

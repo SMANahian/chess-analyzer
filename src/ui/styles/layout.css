@@ -194,7 +194,15 @@
   font-size: 0.6875rem;
 }
 
-@media (min-width: 768px) {
+/* Phones and small tablets: the bottom tab bar. Focused controls stay clear of it. */
+@media (max-width: 799px) {
+  html {
+    scroll-padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 8px);
+  }
+}
+
+/* The desktop header from 800px (below that its links do not fit next to the brand). */
+@media (min-width: 800px) {
   .top-nav,
   .top-nav.top-nav-end {
     display: flex;

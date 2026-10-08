@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { START_FEN } from '../../core/chess';
 import {
+  describePawnDrop,
   evalWords,
   formatCountdown,
   formatEta,
@@ -109,5 +110,22 @@ describe('game links', () => {
       'https://www.chess.com/game/daily/9',
     );
     expect(gameUrl({ platform: 'pgn', sourceId: '0123456789abcdef' })).toBeUndefined();
+  });
+});
+
+describe('describePawnDrop', () => {
+  it('is the engine’s drop between the best move and the move played', () => {
+    expect(describePawnDrop({ cp: -225 }, { cp: -723 })).toBe('≈5.0 pawns');
+    expect(describePawnDrop({ cp: 40 }, { cp: -60 })).toBe('≈1.0 pawn');
+    expect(describePawnDrop({ cp: 455 }, { cp: -270 })).toBe('≈7.3 pawns');
+  });
+  it('reads ≥10 pawns for a mate in either score or a drop of ten pawns or more', () => {
+    expect(describePawnDrop({ mate: 3 }, { cp: 200 })).toBe('≥10 pawns');
+    expect(describePawnDrop({ cp: 100 }, { mate: -2 })).toBe('≥10 pawns');
+    expect(describePawnDrop({ cp: 900 }, { cp: -1500 })).toBe('≥10 pawns');
+  });
+  it('clamps scores beyond ±10 pawns and never goes negative', () => {
+    expect(describePawnDrop({ cp: 2500 }, { cp: 950 })).toBe('≈0.5 pawns');
+    expect(describePawnDrop({ cp: -50 }, { cp: -30 })).toBe('≈0.0 pawns');
   });
 });
