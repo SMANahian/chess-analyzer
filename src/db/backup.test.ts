@@ -1,7 +1,8 @@
 import 'fake-indexeddb/auto';
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { START_FEN, playUci, posFromFen, posKey, sansToUci } from '../core/chess';
-import { DEFAULT_SETTINGS, type PositionEval } from '../core/types';
+import { DEFAULT_SETTINGS, type Mistake, type Occurrence, type PositionEval, type ReviewState, type Settings } from '../core/types';
 import { winLoss } from '../core/winrate';
 import { setLichessCooldown } from '../sources/http';
 import { FakeLichess, lichessLine, storedGame, testMistake } from '../services/__fixtures__/fakes';
@@ -59,23 +60,36 @@ const comparable = (b: BackupFile): unknown => ({
 describe('v3 export / import', () => {
   it('round-trips every table', async () => {
     await populate();
-    const exported = await exportBackup({ includeEvals: true, now: 42 });
+    const exported = await exportBackup({ now: 42 });
     expect(exported).toMatchObject({ app: 'chess-analyzer', version: 3, exportedAt: 42 });
     expect(exported.profiles).toHaveLength(2);
     expect(exported.settings).toEqual({ ...DEFAULT_SETTINGS, preset: 'thorough', sessionSize: 15 });
-    expect(exported.evals).toHaveLength(1);
 
     await clearAllData();
     expect(await repo.listProfiles()).toEqual([]);
 
     const json: unknown = JSON.parse(JSON.stringify(exported));
     expect(await importBackup(json)).toEqual({ profiles: 2, games: 2, mistakes: 2 });
-    expect(comparable(await exportBackup({ includeEvals: true }))).toEqual(comparable(exported));
+    expect(comparable(await exportBackup())).toEqual(comparable(exported));
   });
 
-  it('leaves evals out unless asked', async () => {
+  it('never exports the eval cache', async () => {
     await populate();
     expect((await exportBackup()).evals).toBeUndefined();
+  });
+
+  it('ignores an evals list in the file: the eval cache is never written by an import', async () => {
+    await populate();
+    const file = JSON.parse(JSON.stringify(await exportBackup())) as Record<string, unknown>;
+    // A planted evaluation for a position the cache already has, and one it has not.
+    const planted = [{ ...anEval('k1'), best: { move: 'a2a3', score: { cp: 900 }, pv: ['a2a3'], depth: 30 } }, anEval('k9')];
+    for (const mode of ['replace', 'merge'] as const) {
+      const data = mode === 'merge' ? { ...file, profiles: (file.profiles as { kind: string }[]).map(p => ({ ...p, kind: 'opponent' })) } : file;
+      await importBackup({ ...data, evals: planted }, { mode });
+      const cached = await repo.getEvals(['sf|k1', 'sf|k9']);
+      expect([...cached.keys()]).toEqual(['sf|k1']);
+      expect(cached.get('sf|k1')).toEqual(anEval('k1'));
+    }
   });
 
   it('replaces existing data but keeps the eval cache', async () => {
@@ -143,6 +157,109 @@ describe('v3 export / import', () => {
     expect(await repo.listProfiles()).toHaveLength(3);
     expect(await repo.getAttempts(source.self)).toHaveLength(1);
     expect(await repo.getMistakes(mine)).toEqual([]);
+  });
+});
+
+describe('v3 import: nested fields and settings', () => {
+  const DEMO = JSON.parse(readFileSync(new URL('../../public/demo/demo.json', import.meta.url), 'utf8')) as BackupFile;
+  /** The demo as a regular backup (without the demo flag), with `edit` applied to a deep copy. */
+  function demoWith(edit: (file: BackupFile) => void): BackupFile {
+    const file = JSON.parse(JSON.stringify(DEMO)) as BackupFile;
+    for (const p of file.profiles) delete p.demo;
+    edit(file);
+    return file;
+  }
+  const active = (file: BackupFile): Mistake => file.mistakes.find(m => m.status === 'active')!;
+
+  it('round-trips the demo backup', async () => {
+    await importBackup(demoWith(() => undefined));
+    const exported = JSON.parse(JSON.stringify(await exportBackup({ now: DEMO.exportedAt }))) as BackupFile;
+    expect(comparable(exported)).toEqual(comparable(demoWith(() => undefined)));
+  });
+
+  it('rejects damaged nested data and leaves the database as it was', async () => {
+    const { self } = await populate();
+    const before = await exportBackup({ now: 1 });
+    const cases: [string, (f: BackupFile) => void, RegExp][] = [
+      ['a null occurrence', f => (active(f).occurrences as unknown[]).push(null), /mistakes\[\d+\] is not a valid record/],
+      ['an occurrence without a speed', f => delete (active(f).occurrences[0] as Partial<Occurrence>).s, /mistakes\[\d+\]/],
+      ['a numeric opening name', f => ((active(f) as unknown as Record<string, unknown>).openingName = 42), /mistakes\[\d+\]/],
+      ['an unknown severity', f => ((active(f) as unknown as Record<string, unknown>).severity = 'catastrophe'), /mistakes\[\d+\]/],
+      ['an unknown kind', f => ((active(f) as unknown as Record<string, unknown>).kind = 'gambit'), /mistakes\[\d+\]/],
+      ['a FEN that does not parse', f => (active(f).fen = 'not a fen'), /mistakes\[\d+\]/],
+      ['a played line that is not a list of moves', f => ((active(f) as unknown as Record<string, unknown>).playedLine = 'e2e4'), /mistakes\[\d+\]/],
+      ['a score without cp or mate', f => (active(f).scoreBest = {}), /mistakes\[\d+\]/],
+      ['a non-numeric impact', f => ((active(f) as unknown as Record<string, unknown>).impact = 'high'), /mistakes\[\d+\]/],
+      ['a numeric dependsOn', f => ((active(f) as unknown as Record<string, unknown>).dependsOn = 7), /mistakes\[\d+\]/],
+      ['a review without an interval', f => delete (f.reviews[0] as Partial<ReviewState>).interval, /reviews\[0\]/],
+      ['a review due at Infinity (NaN in JSON)', f => ((f.reviews[0] as unknown as Record<string, unknown>).due = null), /reviews\[0\]/],
+      ['a game with an unknown outcome', f => ((f.games[0] as unknown as Record<string, unknown>).outcome = 'won'), /games\[0\]/],
+    ];
+    for (const [name, edit, message] of cases) {
+      await expect(importBackup(demoWith(edit)), name).rejects.toThrow(message);
+    }
+    expect(comparable(await exportBackup({ now: 1 }))).toEqual(comparable(before));
+    expect(await repo.getMistakes(self)).toHaveLength(1);
+  });
+
+  it('a damaged demo cannot be loaded either (merge mode)', async () => {
+    const bad = demoWith(f => (active(f).occurrences as unknown[]).push(null));
+    await expect(importBackup(bad, { mode: 'merge', demo: true })).rejects.toThrow(/is not a valid record/);
+    expect(await repo.listProfiles()).toEqual([]);
+  });
+
+  it('restores settings the Settings page could not produce as valid values', async () => {
+    const file = demoWith(f => {
+      f.settings = {
+        ...f.settings,
+        sessionSize: -5,
+        newPerDay: 'abc',
+        depthOverride: 245,
+        openingPlies: 13,
+        replayPlies: 99,
+        engineWorkers: 2.5,
+        gamesPerAccount: 2500,
+        preset: 'insane',
+        theme: 7,
+        autoSync: 'yes',
+        lastBackupAt: 'never',
+        surprise: true,
+      } as unknown as Settings;
+    });
+    await importBackup(file);
+    expect(await repo.getSettings()).toEqual({
+      ...DEFAULT_SETTINGS,
+      sessionSize: 5,
+      newPerDay: DEFAULT_SETTINGS.newPerDay,
+      depthOverride: 0,
+      openingPlies: 14,
+      replayPlies: 12,
+      engineWorkers: 3,
+      gamesPerAccount: 3000,
+    });
+    // Valid values are kept as they are.
+    const custom = { ...DEFAULT_SETTINGS, preset: 'quick', depthOverride: 18, sessionSize: 30, newPerDay: 0, openingPlies: 40, theme: 'dark', autoSync: false, gamesPerAccount: 10000, lastBackupAt: 5 } as const;
+    await importBackup(demoWith(f => (f.settings = { ...custom })));
+    expect(await repo.getSettings()).toEqual(custom);
+  });
+
+  it('keeps this browser’s storagePersisted: it is neither exported nor restored', async () => {
+    await repo.saveSettings({ storagePersisted: true, sessionSize: 12 });
+    const fromA = await exportBackup();
+    expect(fromA.settings).not.toHaveProperty('storagePersisted');
+    expect(fromA.settings.sessionSize).toBe(12);
+
+    // Device B never asked: it stays unasked (undefined), so the app still asks after its first analysis.
+    useTestDb();
+    await importBackup(JSON.parse(JSON.stringify({ ...fromA, settings: { ...fromA.settings, storagePersisted: true } })));
+    expect((await repo.getSettings()).storagePersisted).toBeUndefined();
+    expect((await repo.getSettings()).sessionSize).toBe(12);
+
+    // Device C was refused: it stays refused (the backup reminder keeps showing).
+    useTestDb();
+    await repo.saveSettings({ storagePersisted: false });
+    await importBackup(JSON.parse(JSON.stringify({ ...fromA, settings: { ...fromA.settings, storagePersisted: true } })));
+    expect((await repo.getSettings()).storagePersisted).toBe(false);
   });
 });
 

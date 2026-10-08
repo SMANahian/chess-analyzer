@@ -42,6 +42,8 @@ function expectedIds(lines: Record<string, unknown>[], from: number, to: number)
 }
 
 const createdAtOf = (lines: Record<string, unknown>[]): number[] => lines.map(g => g.createdAt as number);
+/** The game export requests (the run may also look up the account's game count). */
+const exportsOf = (fake: FakeLichess): URL[] => fake.requests.filter(u => u.pathname.startsWith('/api/games/user/'));
 
 describe('Lichess sync', () => {
   it('first sync: newest games first, capped by the limit; the cursor covers every received line', async () => {
@@ -50,7 +52,7 @@ describe('Lichess sync', () => {
     const id = await profileWith([HERO]);
     const result = await syncProfile(id, { fetchImpl: fake.fetchImpl, now, limit: 30 });
 
-    const url = fake.requests[0]!;
+    const url = exportsOf(fake)[0]!;
     expect(url.pathname).toBe('/api/games/user/Hero');
     expect(url.searchParams.get('sort')).toBe('dateDesc');
     expect(url.searchParams.get('max')).toBe('30');
@@ -112,7 +114,7 @@ describe('Lichess sync', () => {
     };
     await syncProfile(id, { fetchImpl: fake.fetchImpl, now });
     fake.override = null;
-    expect(fake.requests.map(u => u.searchParams.get('sort'))).toEqual(['dateAsc', 'dateDesc']);
+    expect(exportsOf(fake).map(u => u.searchParams.get('sort'))).toEqual(['dateAsc', 'dateDesc']);
     const third = await syncProfile(id, { fetchImpl: fake.fetchImpl, now });
     expect(third.errors).toEqual([]);
 
@@ -161,6 +163,35 @@ describe('Lichess sync', () => {
     expect(state.newestCreatedAt).toBe(fresh[0]!.createdAt);
     // Contiguous: every game inside the covered interval is stored.
     expect(await storedIds(id)).toEqual(expectedIds(fake.games, state.oldestCreatedAt!, state.newestCreatedAt!));
+  });
+
+  it('after a break with more new games than the run limit, the forward pass still reaches the newest game', async () => {
+    const HOUR = 3_600_000;
+    const T0 = NOW - 200 * DAY;
+    const old = lichessHistory('Hero', 1000, T0, { idPrefix: 'o', spacingMs: HOUR });
+    const fake = new FakeLichess(old);
+    const id = await profileWith([HERO]);
+    await syncProfile(id, { fetchImpl: fake.fetchImpl, now: () => T0 + HOUR });
+    // A long break: 2,500 new games, the newest an hour ago; the default limit is 1,000 per run.
+    const fresh = lichessHistory('Hero', 2500, NOW - HOUR, { idPrefix: 'n', spacingMs: 10 * 60_000 });
+    fake.games = [...old, ...fresh];
+    fake.requests.length = 0;
+    const result = await syncProfile(id, { fetchImpl: fake.fetchImpl, now });
+    expect(result.errors).toEqual([]);
+
+    const games = await repo.getGames(id);
+    expect(NOW - games.at(-1)!.playedAt).toBeLessThan(2 * HOUR);
+    const state = await stateOf(id);
+    expect(state.newestCreatedAt).toBe(fresh[0]!.createdAt);
+    // No gap: every new game (and every game in the covered interval) is stored.
+    const ids = await storedIds(id);
+    expect(ids.filter(k => k.startsWith('lichess:n'))).toEqual(expectedIds(fresh, -Infinity, Infinity));
+    expect(ids).toEqual(expectedIds(fake.games, state.oldestCreatedAt!, state.newestCreatedAt!));
+    // Pages of the run limit, each continuing after the last game of the one before.
+    const forward = exportsOf(fake).map(u => u.searchParams);
+    expect(forward.every(q => q.get('sort') === 'dateAsc' && q.get('max') === '1000')).toBe(true);
+    expect(forward.length).toBeGreaterThanOrEqual(3);
+    expect(state.lastSyncAt).toBe(NOW);
   });
 
   it('backfills older games when gamesPerAccount is raised, until the history starts', async () => {
@@ -314,23 +345,63 @@ describe('errors', () => {
     expect(progress.at(-1)).toMatchObject({ phase: 'cooldown', errorKind: 'rate-limited' });
     expect((await repo.getProfile(id))!.lastSyncAt).toBeUndefined();
 
-    // While the shared cooldown lasts no request is made at all.
+    // While the shared cooldown lasts no request is made at all (the fake clock, never the wall clock:
+    // a test comparing Date.now() with a fixed NOW starts failing once that date has passed).
     fake.override = null;
     fake.requests.length = 0;
-    const again = await syncProfile(id, { fetchImpl: fake.fetchImpl, now: () => Date.now() });
+    const again = await syncProfile(id, { fetchImpl: fake.fetchImpl, now: () => NOW + 30_000 });
     expect(again.errors.map(e => e.kind)).toEqual(['rate-limited']);
     expect(fake.requests).toEqual([]);
+
+    // Once it has ended, the account is synced again.
+    const after = await syncProfile(id, { fetchImpl: fake.fetchImpl, now: () => NOW + 61_000 });
+    expect(after.errors).toEqual([]);
+    expect(fake.requests.some(u => u.pathname === '/api/games/user/Hero')).toBe(true);
+    expect(after.added).toBeGreaterThan(0);
   });
 
-  it('reports progress with the expected count for the current request', async () => {
+  it('reports progress with the expected count for the current request: the account’s games, not the request max', async () => {
     const fake = new FakeLichess(lichessHistory('Hero', 25, NOW - DAY));
     const id = await profileWith([HERO]);
     const progress: SyncProgress[] = [];
     await syncProfile(id, { fetchImpl: fake.fetchImpl, now, limit: 300, onProgress: p => progress.push(p) });
     expect(progress[0]).toMatchObject({ profileId: id, phase: 'running', fetched: 0, added: 0 });
-    expect(progress.some(p => p.expected === 300 && p.account?.username === 'Hero')).toBe(true);
+    // The account has 25 games (count.all), so the request for 300 returns 25: the bar ends full.
+    expect(progress.some(p => p.expected === 25 && p.account?.username === 'Hero')).toBe(true);
+    expect(progress.some(p => (p.expected ?? 0) > 25)).toBe(false);
     expect(progress.some(p => /about \d+ s left/.test(p.message ?? ''))).toBe(true);
     expect(progress.at(-1)).toMatchObject({ phase: 'done', fetched: 25, added: 22 });
+  });
+
+  it('a backfill expects the games the account has beyond those stored, on the scale of `fetched`', async () => {
+    // 400 games (none aborted); the first run stores the newest 300.
+    const history = lichessHistory('Hero', 400, NOW - DAY, { spacingMs: 3_600_000 }).map(g => ({ ...g, status: 'resign' }));
+    const fake = new FakeLichess(history);
+    const id = await profileWith([HERO]);
+    await syncProfile(id, { fetchImpl: fake.fetchImpl, now, limit: 300 });
+    expect((await stateOf(id)).stored).toBe(300);
+
+    const progress: SyncProgress[] = [];
+    await syncProfile(id, { fetchImpl: fake.fetchImpl, now, onProgress: p => progress.push(p) });
+    const backfill = exportsOf(fake).at(-1)!.searchParams;
+    expect(backfill.get('sort')).toBe('dateDesc');
+    expect(backfill.get('max')).toBe('700');
+    // The forward pass re-read the overlap (no estimate); the backfill then expects 100 more lines.
+    const forwardLines = progress.find(p => p.expected !== undefined)!.fetched;
+    expect(progress.filter(p => p.expected !== undefined).map(p => p.expected! - forwardLines)).toContain(100);
+    expect(progress.filter(p => p.phase === 'running').every(p => p.expected === undefined || p.fetched <= p.expected)).toBe(true);
+    expect(progress.at(-1)).toMatchObject({ phase: 'done', fetched: forwardLines + 100 });
+    expect((await stateOf(id)).stored).toBe(400);
+  });
+
+  it('without a game count (the lookup fails) the request max is the estimate, and the sync still runs', async () => {
+    const fake = new FakeLichess(lichessHistory('Hero', 25, NOW - DAY));
+    fake.override = url => (url.pathname.startsWith('/api/user/') ? new Response('', { status: 400 }) : undefined);
+    const id = await profileWith([HERO]);
+    const progress: SyncProgress[] = [];
+    const result = await syncProfile(id, { fetchImpl: fake.fetchImpl, now, limit: 300, onProgress: p => progress.push(p) });
+    expect(result).toMatchObject({ added: 22, errors: [] });
+    expect(progress.some(p => p.expected === 300)).toBe(true);
   });
 });
 

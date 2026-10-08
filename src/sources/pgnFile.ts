@@ -1,6 +1,6 @@
 // PGN files of any size: streamed from a Blob in chunks, split into games and converted to RawGame,
 // yielding to the event loop regularly so the page stays responsive.
-import { PgnNameCounter, PgnStreamSplitter, parsePgnGame, pgnGameToRaw } from '../core/pgn';
+import { LoneCrNormalizer, PgnNameCounter, PgnStreamSplitter, parsePgnGame, pgnGameToRaw } from '../core/pgn';
 import { MAX_STORED_PLIES, type RawGame } from '../core/types';
 import { throwIfAborted, yieldToEventLoop } from './http';
 
@@ -86,8 +86,11 @@ export async function* readPgnFile(input: Blob | string, opts: PgnReadOptions = 
  */
 export async function scanPgnFileNames(input: Blob | string, limit = 10, opts: { signal?: AbortSignal } = {}): Promise<{ name: string; games: number }[]> {
   const counter = new PgnNameCounter();
+  // Lone CRs (old Mac files) become line breaks, so the file is still read a line at a time.
+  const cr = new LoneCrNormalizer();
   let partialLine = '';
-  for await (const { text } of blobText(asBlob(input), opts.signal)) {
+  for await (const chunk of blobText(asBlob(input), opts.signal)) {
+    const text = cr.push(chunk.text);
     const cut = text.lastIndexOf('\n') + 1;
     if (cut === 0) {
       partialLine += text;
@@ -96,6 +99,6 @@ export async function scanPgnFileNames(input: Blob | string, limit = 10, opts: {
     counter.add(partialLine + text.slice(0, cut));
     partialLine = text.slice(cut);
   }
-  counter.add(partialLine);
+  counter.add(partialLine + cr.flush());
   return counter.top(limit);
 }

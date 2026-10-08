@@ -4,7 +4,7 @@ import type { Position } from 'chessops/chess';
 import type { NormalMove, Role } from 'chessops/types';
 import { opposite } from 'chessops/util';
 import { materialBalance, parseStandardUci, posFromFen } from './chess';
-import type { Color, Score } from './types';
+import type { Color, Mistake, Score } from './types';
 
 const DEFAULT_PLIES = 6;
 /** Plies a line may run past the horizon while it keeps capturing, so an exchange is not cut in half. */
@@ -73,19 +73,49 @@ function describeLoss(n: number, net: (role: Role) => number): string {
   return 'loses material';
 }
 
+/** The position after the line's window (DEFAULT_PLIES plus a trailing capture sequence) and the material the mover lost. */
+function outcomeOf(start: Position, line: readonly string[]): { end: Position; lost: number } {
+  const end = start.clone();
+  playOut(end, line, DEFAULT_PLIES);
+  const sign = start.turn === 'white' ? 1 : -1;
+  return { end, lost: sign * (materialBalance(start) - materialBalance(end)) || 0 };
+}
+
 /**
  * "allows mate", "loses the queen", "loses a rook", "loses a piece", "loses the exchange",
  * "loses two pawns", "loses a pawn", "loses material", or '' when nothing simple can be said.
  * Material is judged like materialSwing (6 plies plus a trailing capture sequence).
  * `score` (optional) is the line's score from the mover's point of view.
+ *
+ * With `bestLine` (the engine's best line from the same position, `bestScore` its score), the line is
+ * judged against it, over the same window: material that the best line gives up as well (a pawn that
+ * was already en prise, a gambit both lines accept) is not blamed on the line's first move, and
+ * neither is a mate that the best line allows too. Only what the line loses beyond the best line is
+ * described ('' when that is nothing, so callers fall back to describing the resulting position).
  */
-export function explainLine(fen: string, line: readonly string[], score?: Score): string {
+export function explainLine(fen: string, line: readonly string[], score?: Score, bestLine?: readonly string[], bestScore?: Score): string {
   const start = posFromFen(fen);
   if (!start || line.length === 0) return '';
-  if (allowsMate(start, line, score)) return 'allows mate';
-  const end = start.clone();
-  playOut(end, line, DEFAULT_PLIES);
-  const sign = start.turn === 'white' ? 1 : -1;
-  const lost = sign * (materialBalance(start) - materialBalance(end));
-  return lost >= 1 ? describeLoss(lost, role => netLoss(start, end, role)) : '';
+  const best = bestLine && bestLine.length > 0 ? bestLine : undefined;
+  if (allowsMate(start, line, score) && !(best && allowsMate(start, best, bestScore))) return 'allows mate';
+  const played = outcomeOf(start, line);
+  if (!best) return played.lost >= 1 ? describeLoss(played.lost, role => netLoss(start, played.end, role)) : '';
+  // What the best line loses is the baseline; a gain in the best line is no loss of the played line.
+  const baseline = outcomeOf(start, best);
+  const lost = played.lost - Math.max(0, baseline.lost);
+  if (lost < 1) return '';
+  return describeLoss(lost, role => netLoss(start, played.end, role) - Math.max(0, netLoss(start, baseline.end, role)));
+}
+
+/** The pieces of a mistake the explanation needs. */
+export type ExplainableMistake = Pick<Mistake, 'fen' | 'move' | 'bestMove' | 'playedLine' | 'bestLine' | 'scorePlayed' | 'scoreBest'>;
+
+/**
+ * Why the habit move fails, judged against the best move (see explainLine): its refutation line
+ * (playedLine, or just the move) against bestLine. Shared by the UI and the PGN export.
+ */
+export function explainMistake(m: ExplainableMistake): string {
+  const line = m.playedLine[0] === m.move ? m.playedLine : [m.move];
+  const best = m.bestLine[0] === m.bestMove ? m.bestLine : [m.bestMove];
+  return explainLine(m.fen, line, m.scorePlayed, best, m.scoreBest);
 }

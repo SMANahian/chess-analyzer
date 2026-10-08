@@ -28,20 +28,35 @@ export const PRESET_DEPTHS: Readonly<Record<AnalysisPreset, { triage: number; co
 };
 /** A reviewed mistake stays (instead of going dormant) while its loss is at least this (hysteresis). */
 export const HYSTERESIS_LOSS = 3;
-/** Games per aggregation slice; the event loop runs between slices. */
-const AGGREGATE_CHUNK = 500;
+/** Games per aggregation slice; between slices the event loop runs once AGGREGATE_BUDGET_MS have passed. */
+const AGGREGATE_SLICE = 25;
+/** Main-thread time aggregation may take before it yields (a long task is ≥ 50 ms, even on slow phones). */
+const AGGREGATE_BUDGET_MS = 8;
 /** Classified mistakes are written (and reported) in batches at most this far apart. */
 const FLUSH_MS = 300;
 /** Progress reports are throttled to one per this many ms (phase changes always report). */
 const PROGRESS_MS = 100;
 /** Refutation searches failing this many times in a row (e.g. the engine cannot load) end the run. */
 const MAX_CONSECUTIVE_FAILURES = 3;
+/** No time estimate until this share of the engine-bound work is done. */
+const ETA_MIN_FRACTION = 0.05;
+/** Weight of a new estimate against the running one (which counts down with the clock). */
+const ETA_SMOOTHING = 0.3;
 
 export interface AnalysisDeps {
   pool: PoolLike;
   book?: OpeningBook;
   signal?: AbortSignal;
+  /**
+   * The analysis settings to use (default: the stored settings, read when the run starts). The caller
+   * passes the settings it records as "analysed with", so a change made during the run is never
+   * recorded as applied.
+   */
+  settings?: Pick<Settings, 'openingPlies' | 'preset' | 'depthOverride'>;
+  /** Timestamps of the results (runAt, lastAnalysisAt, impact). */
   now?: () => number;
+  /** Elapsed-time clock for the progress estimate (default Date.now). */
+  clock?: () => number;
   onProgress?(p: AnalysisProgress): void;
   /** Mistakes as stored (user decisions merged in), batch by batch. */
   onMistakes?(ms: Mistake[]): void;
@@ -72,15 +87,22 @@ export function presetDepths(s: Pick<Settings, 'preset' | 'depthOverride'>): { t
 
 // ── Aggregation ───────────────────────────────────────────────────────────
 
+/** Both aggregation passes in small slices, yielding to the event loop whenever the time budget is used up. */
 async function aggregateInChunks(games: readonly StoredGame[], openingPlies: number, signal?: AbortSignal): Promise<Candidate[]> {
   const agg = new Aggregator({ openingPlies: Math.min(openingPlies, MAX_STORED_PLIES) });
+  let sliceStart = performance.now();
   for (const pass of [agg.count.bind(agg), agg.detail.bind(agg)]) {
-    for (let i = 0; i < games.length; i += AGGREGATE_CHUNK) {
-      pass(games.slice(i, i + AGGREGATE_CHUNK));
-      await yieldToEventLoop();
-      throwIfAborted(signal);
+    for (let i = 0; i < games.length; i += AGGREGATE_SLICE) {
+      pass(games.slice(i, i + AGGREGATE_SLICE));
+      if (performance.now() - sliceStart >= AGGREGATE_BUDGET_MS) {
+        await yieldToEventLoop();
+        throwIfAborted(signal);
+        sliceStart = performance.now();
+      }
     }
   }
+  await yieldToEventLoop();
+  throwIfAborted(signal);
   return agg.candidates();
 }
 
@@ -95,17 +117,34 @@ async function bookOrNothing(book: OpeningBook | undefined): Promise<OpeningBook
 
 // ── Progress ──────────────────────────────────────────────────────────────
 
+/**
+ * Engine searches a position costs (the best move, then one per other candidate move): the unit of
+ * work for the estimate. Positions come most-played first, and those have the most moves, so counting
+ * positions would overestimate the remaining time several times over early in a run.
+ */
+export const searchesOf = (task: Pick<EvalTask, 'moves'>): number => task.moves.length + 1;
+
 class Progress {
   value: AnalysisProgress;
   private lastEmit = 0;
-  /** Wall-clock start of the engine-bound part (after the cache hits). */
-  private engineEpoch = Date.now();
+  /** Work (searches) of the current phase: total and done. */
+  private phaseUnits = 0;
+  private phaseDone = 0;
+  /** Engine-bound work done in this phase, since `engineEpoch` (after the cache hits). */
+  private engineUnits = 0;
+  private engineResults = 0;
+  private engineEpoch: number;
+  /** Results in flight at once: the estimate waits until the first wave is in. */
+  private lanes = 1;
+  private eta: { ms: number; at: number } | null = null;
 
   constructor(
     profileId: string,
     startedAt: number,
+    private readonly clock: () => number,
     private readonly onProgress?: (p: AnalysisProgress) => void,
   ) {
+    this.engineEpoch = clock();
     this.value = {
       profileId,
       phase: 'preparing',
@@ -124,34 +163,65 @@ class Progress {
   /** Reports at once (phase changes, totals). */
   set(patch: Partial<AnalysisProgress>): void {
     this.value = { ...this.value, ...patch };
-    this.lastEmit = Date.now();
+    this.lastEmit = this.clock();
     this.onProgress?.(this.value);
   }
 
-  result(weight: number, origin: EvalOrigin | 'refutation', mistakesFound: number): void {
+  /** A new phase of `units` searches (evaluation, then refutations), `lanes` at a time: the estimate starts over. */
+  startPhase(units: number, lanes: number, patch: Partial<AnalysisProgress>): void {
+    this.phaseUnits = units;
+    this.phaseDone = 0;
+    this.engineUnits = 0;
+    this.engineResults = 0;
+    this.engineEpoch = this.clock();
+    this.lanes = Math.max(1, lanes);
+    this.eta = null;
+    this.set({ ...patch, etaMs: undefined });
+  }
+
+  /**
+   * One position done. The estimate = remaining searches × measured time per search of the
+   * engine-bound part (cache hits all come first and cost nothing), once ETA_MIN_FRACTION of that part
+   * and a first result per lane are in; smoothed against the running estimate, which counts down.
+   */
+  result(weight: number, units: number, origin: EvalOrigin | 'refutation', mistakesFound: number): void {
     const v = { ...this.value, donePositions: this.value.donePositions + 1, weightDone: this.value.weightDone + weight, mistakesFound };
+    const t = this.clock();
+    this.phaseDone += units;
     if (origin === 'cache') {
       v.cacheHits++;
-      this.engineEpoch = Date.now();
+      this.engineEpoch = t;
     } else {
       v.engineEvals++;
-      // Measured rate of the engine-bound positions; cache hits all come first.
-      const perPosition = (Date.now() - this.engineEpoch) / v.engineEvals;
-      if (v.engineEvals >= 2) v.etaMs = Math.max(0, Math.round((v.totalPositions - v.donePositions) * perPosition));
+      this.engineUnits += units;
+      this.engineResults++;
+      const remaining = Math.max(0, this.phaseUnits - this.phaseDone);
+      if (this.engineResults >= this.lanes && this.engineUnits >= ETA_MIN_FRACTION * (this.engineUnits + remaining)) {
+        const raw = (remaining * (t - this.engineEpoch)) / this.engineUnits;
+        const running = this.eta ? Math.max(0, this.eta.ms - (t - this.eta.at)) : raw;
+        const ms = this.eta ? running + ETA_SMOOTHING * (raw - running) : raw;
+        this.eta = { ms, at: t };
+        v.etaMs = Math.max(0, Math.round(ms));
+      }
     }
     this.value = v;
-    if (Date.now() - this.lastEmit >= PROGRESS_MS || v.donePositions === v.totalPositions) this.set({});
+    if (t - this.lastEmit >= PROGRESS_MS || v.donePositions === v.totalPositions) this.set({});
   }
 }
 
 // ── Batched writes ────────────────────────────────────────────────────────
 
-/** Buffers classified mistakes and upserts them at most FLUSH_MS apart, one write at a time. */
+/**
+ * Buffers classified mistakes and upserts them at most FLUSH_MS apart, one write at a time. The rows
+ * carry no dependency links yet (only a complete run computes them), so a stored row keeps its link.
+ */
 class MistakeWriter {
   private buffer: Mistake[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
   private chain: Promise<void> = Promise.resolve();
   private failure: { err: unknown } | null = null;
+  /** The link (dependsOn) of each written row as stored. */
+  readonly storedLinks = new Map<string, string | undefined>();
 
   constructor(private readonly onMistakes?: (ms: Mistake[]) => void) {}
 
@@ -172,7 +242,8 @@ class MistakeWriter {
     this.chain = this.chain.then(async () => {
       if (batch.length === 0 || this.failure) return;
       try {
-        const stored = await repo.upsertMistakes(batch);
+        const stored = await repo.upsertMistakes(batch, { keepLinks: true });
+        for (const m of stored) this.storedLinks.set(m.id, m.dependsOn);
         this.onMistakes?.(stored);
       } catch (err) {
         this.failure = { err };
@@ -229,7 +300,9 @@ async function addRefutations(profileId: string, producedIds: ReadonlySet<string
   const stored = await repo.getMistakes(profileId);
   const todo = stored.filter(m => producedIds.has(m.id) && !(m.refutation && m.refutation.depth >= depth));
   if (todo.length === 0) return 0;
-  progress.set({ phase: 'evaluating', totalPositions: progress.value.totalPositions + todo.length, etaMs: undefined });
+  // One search per refutation, at the confirm depth: a phase of its own for the estimate.
+  const lanes = Math.min(deps.pool.size, todo.length);
+  progress.startPhase(todo.length, lanes, { phase: 'evaluating', totalPositions: progress.value.totalPositions + todo.length });
   let next = 0;
   let failed = 0;
   let consecutiveFailures = 0;
@@ -251,10 +324,10 @@ async function addRefutations(profileId: string, producedIds: ReadonlySet<string
         if (++consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) fatal ??= { err };
         continue;
       }
-      progress.result(0, 'refutation', progress.value.mistakesFound);
+      progress.result(0, 1, 'refutation', progress.value.mistakesFound);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(deps.pool.size, todo.length) }, lane));
+  await Promise.all(Array.from({ length: lanes }, lane));
   throwIfAborted(deps.signal);
   if (fatal) throw (fatal as { err: unknown }).err;
   return failed;
@@ -279,13 +352,13 @@ async function reviewedMistakes(profileId: string): Promise<{ ids: Set<string>; 
 export async function analyzeProfile(profileId: string, deps: AnalysisDeps): Promise<AnalysisResult> {
   const now = deps.now ?? Date.now;
   const runAt = now();
-  const progress = new Progress(profileId, runAt, deps.onProgress);
+  const progress = new Progress(profileId, runAt, deps.clock ?? Date.now, deps.onProgress);
   const writer = new MistakeWriter(deps.onMistakes);
   progress.set({});
   try {
     const profile = await repo.getProfile(profileId);
     if (!profile) throw new Error(`No profile ${profileId}`);
-    const settings = await repo.getSettings();
+    const settings = deps.settings ?? (await repo.getSettings());
     const depths = presetDepths(settings);
     const games = await repo.getGames(profileId);
     const candidates = await aggregateInChunks(games, settings.openingPlies, deps.signal);
@@ -299,13 +372,12 @@ export async function analyzeProfile(profileId: string, deps: AnalysisDeps): Pro
       return keepLow ? ms.filter(m => m.winLoss >= ANALYSIS_MIN_LOSS || reviewed.ids.has(m.id)) : ms;
     };
 
-    progress.set({
-      phase: 'evaluating',
-      gamesUsed: games.length,
-      totalPositions: candidates.length,
-      weightTotal: candidates.reduce((sum, c) => sum + c.weight, 0),
-    });
     const tasks: EvalTask[] = candidates.map(c => ({ key: c.key, fen: c.fen, moves: c.moves, weight: c.weight }));
+    progress.startPhase(
+      tasks.reduce((sum, t) => sum + searchesOf(t), 0),
+      deps.pool.size,
+      { phase: 'evaluating', gamesUsed: games.length, totalPositions: candidates.length, weightTotal: candidates.reduce((sum, c) => sum + c.weight, 0) },
+    );
     const summary = await evaluateAll(tasks, {
       pool: deps.pool,
       getCached: repo.getEvals,
@@ -318,7 +390,7 @@ export async function analyzeProfile(profileId: string, deps: AnalysisDeps): Pro
         const ms = classify(byKey.get(task.key)!, ev);
         for (const m of ms) produced.set(m.id, m);
         writer.add(ms);
-        progress.result(task.weight, origin, produced.size);
+        progress.result(task.weight, searchesOf(task), origin, produced.size);
       },
       onError: (task, err) => deps.onPositionError?.(task.fen, err),
     });
@@ -327,8 +399,14 @@ export async function analyzeProfile(profileId: string, deps: AnalysisDeps): Pro
     if (summary.failed === 0 && games.length > 0) {
       const all = [...produced.values()];
       linkDependencies(all);
-      const stored = await repo.upsertMistakes(all);
-      deps.onMistakes?.(stored);
+      // Every row is stored already (with its earlier link): rewrite only those whose link changed,
+      // removed links included (no keepLinks), instead of every row with all its occurrences again.
+      const relinked = all.filter(m => !writer.storedLinks.has(m.id) || writer.storedLinks.get(m.id) !== m.dependsOn);
+      if (relinked.length > 0) {
+        // Two statements: `onMistakes?.(await …)` would skip the write when there is no listener.
+        const rows = await repo.upsertMistakes(relinked);
+        deps.onMistakes?.(rows);
+      }
       await repo.reconcileMistakes(profileId, new Set(produced.keys()));
     }
     const failed =

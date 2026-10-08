@@ -79,6 +79,25 @@ export function sanOf(fen: string, uci: string): string {
   return move ? makeSan(pos, move) : '';
 }
 
+/** Entries kept by sanOfCached; the memo is cleared when it is full. */
+const SAN_CACHE_MAX = 5_000;
+const sanCache = new Map<string, string>();
+
+/**
+ * sanOf, memoised by FEN and move (each call otherwise parses the FEN): for hot paths that ask for the
+ * same moves again and again, such as the live text search over every mistake on each keystroke.
+ */
+export function sanOfCached(fen: string, uci: string): string {
+  const key = `${fen}|${uci}`;
+  let san = sanCache.get(key);
+  if (san === undefined) {
+    if (sanCache.size >= SAN_CACHE_MAX) sanCache.clear();
+    san = sanOf(fen, uci);
+    sanCache.set(key, san);
+  }
+  return san;
+}
+
 /** SAN of a line starting at `fen`; stops at the first illegal move. */
 export function lineToSan(fen: string, ucis: readonly string[]): string[] {
   const pos = posFromFen(fen);

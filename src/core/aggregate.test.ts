@@ -43,14 +43,29 @@ describe('aggregate: distinct-game counting', () => {
     expect(start.weight).toBe(2);
     expect(start.stat.games).toBe(2);
     expect(start.stat.moveGames.get('g1f3')).toBe(2);
-    // The repeated game also played e4 on its third visit: a distinct (position, move) pair in that game.
-    expect(start.stat.moveGames.get('e2e4')).toBe(1);
+    // The repeated game played e4 on its third visit: not its first visit, so not counted (like the occurrence).
+    expect(start.stat.moveGames.has('e2e4')).toBe(false);
     expect(start.stat.occurrences.map(o => [o.g, o.m])).toEqual([
       [other.key, 'g1f3'],
       [rep.key, 'g1f3'],
     ]);
+    expect(start.moves).toEqual(['g1f3']);
+    expect(start.recurring).toEqual(['g1f3']);
+  });
+
+  it('a move played only on later visits of a repeated position never becomes a recurring move', () => {
+    // 1.Nf3 Nf6 2.Ng1 Ng8 3.f3 twice: back at the start, 3.f3 is the second visit's move.
+    const reps = [0, 1].map(() => game('g1f3 g8f6 f3g1 f6g8 f2f3 e7e5', { uci: true }));
+    const e4 = game('e2e4 e7e5', { uci: true });
+    const cs = aggregate([...reps, e4], { openingPlies: 20 });
+    const start = byKey(cs, START_KEY)!;
+    expect(Object.fromEntries(start.stat.moveGames)).toEqual({ g1f3: 2, e2e4: 1 });
     expect(start.moves).toEqual(['g1f3', 'e2e4']);
     expect(start.recurring).toEqual(['g1f3']);
+    expect(start.moves).not.toContain('f2f3');
+    expect(start.stat.occurrences.map(o => o.m).sort()).toEqual(['e2e4', 'g1f3', 'g1f3']);
+    // No other candidate counts f2f3 either (it is only ever played from a repeated position).
+    expect(cs.flatMap(c => c.moves)).not.toContain('f2f3');
   });
 
   it('does not make a candidate out of a move repeated only within a single game', () => {
@@ -72,11 +87,15 @@ describe('aggregate: distinct-game counting', () => {
 
   it('merges positions that differ only by an en-passant square with no legal capture', () => {
     const direct = game('e4 c5', { color: 'black' });
-    const knightTrip = game('e4 Nf6 Nf3 Ng8 Ng1 c5', { color: 'black' });
+    // Reaches the position after 1.e4 with a knight move last: no en-passant square at all.
+    const knightTrip = game('Nf3 Nf6 e4 Ng8 Ng1 c5', { color: 'black' });
     const c = byKey(aggregate([direct, knightTrip], { openingPlies: 20 }), keyAfter('e4'))!;
     expect(c.weight).toBe(2);
-    expect(Object.fromEntries(c.stat.moveGames)).toEqual({ c7c5: 2, g8f6: 1 });
-    expect(c.stat.occurrences.map(o => o.m)).toEqual(['g8f6', 'c7c5']);
+    expect(Object.fromEntries(c.stat.moveGames)).toEqual({ c7c5: 2 });
+    expect(c.stat.occurrences.map(o => [o.g, o.m])).toEqual([
+      [knightTrip.key, 'c7c5'],
+      [direct.key, 'c7c5'],
+    ]);
   });
 
   it('keeps positions apart when only one of them allows an en-passant capture', () => {
@@ -247,7 +266,9 @@ function naiveAggregate(games: readonly StoredGame[], plies: number, minGames: n
       const e = byKey.get(step.key) ?? { games: new Set(), moves: new Map(), first: new Map() };
       byKey.set(step.key, e);
       e.games.add(g.key);
-      if (!e.first.has(g.key)) e.first.set(g.key, step.uci);
+      // Only the first visit in a game counts (its move is the occurrence's move).
+      if (e.first.has(g.key)) continue;
+      e.first.set(g.key, step.uci);
       const set = e.moves.get(step.uci) ?? new Set();
       e.moves.set(step.uci, set.add(g.key));
     }
@@ -274,6 +295,43 @@ describe('aggregate vs a naive reference', () => {
     }));
     expect(fast.length).toBeGreaterThan(50);
     expect(fast).toEqual(naiveAggregate(games, 30, 2));
+  });
+});
+
+/** Every move count equals the occurrences with that move: counts, k-of-n, impact and outcomes agree. */
+function expectCountsMatchOccurrences(cs: readonly Candidate[]): void {
+  for (const c of cs) {
+    const fromOccurrences = new Map<string, number>();
+    for (const o of c.stat.occurrences) fromOccurrences.set(o.m, (fromOccurrences.get(o.m) ?? 0) + 1);
+    expect({ key: c.key, counts: Object.fromEntries(c.stat.moveGames) }).toEqual({ key: c.key, counts: Object.fromEntries(fromOccurrences) });
+    expect(c.weight).toBe(c.stat.occurrences.length);
+    expect(c.moves.length).toBe(c.stat.moveGames.size);
+  }
+}
+
+describe('aggregate: move counts agree with the occurrences', () => {
+  it('on the e2e fixture games', async () => {
+    const { readFileSync: read } = await import('node:fs');
+    const text = read(new URL('../../e2e/fixtures/lichess-games.ndjson', import.meta.url), 'utf8');
+    const lines = text.split('\n').filter(Boolean).map(l => JSON.parse(l) as { variant: string; status: string });
+    const standard = lines.filter(j => j.variant === 'standard' && j.status !== 'aborted').map(j => JSON.stringify(j));
+    const games = storedFromNdjson(standard.join('\n'), 'testhero', standard.length);
+    expect(games.length).toBeGreaterThan(100);
+    const cs = aggregate(games, { openingPlies: 20 });
+    expect(cs.length).toBeGreaterThan(10);
+    expectCountsMatchOccurrences(cs);
+  });
+
+  it('on random games and on games with repetitions', () => {
+    const reps = [
+      'g1f3 g8f6 f3g1 f6g8 f2f3 e7e5',
+      'g1f3 g8f6 f3g1 f6g8 f2f3 e7e5',
+      'g1f3 g8f6 f3g1 f6g8 g1f3 f6g8 f3g1 g8f6 e2e4',
+      'e2e4 e7e5 g1f3 b8c6 f3g1 c6b8 g1f3 b8c6 f1c4',
+      'e2e4 e7e5 g1f3 b8c6 f3g1 c6b8 d2d4',
+    ].map(m => game(m, { uci: true }));
+    expectCountsMatchOccurrences(aggregate(reps, { openingPlies: 20 }));
+    expectCountsMatchOccurrences(aggregate(syntheticGames(400, 30), { openingPlies: 30 }));
   });
 });
 

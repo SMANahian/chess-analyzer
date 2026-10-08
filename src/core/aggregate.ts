@@ -189,14 +189,17 @@ export class Aggregator {
     if (this.detailStarted) throw new Error('Aggregator: count() called after detail()');
     for (const game of games) {
       this.counted++;
+      // A repetition inside one game counts once, with the move of the first visit (as in pass 2, whose
+      // occurrences keep only that visit): a different move on a later visit is not counted at all.
       const seen = new Set<number>();
       forEachTurn(splitMoves(game.moves), game.color, this.openingPlies, (sig, _pos, move) => {
+        const position = hashOf(sig);
+        if (seen.has(position)) return;
+        seen.add(position);
         const pair = hashOf(sig, move);
-        if (seen.has(pair)) return;
-        seen.add(pair);
         const n = (this.pairGames.get(pair) ?? 0) + 1;
         this.pairGames.set(pair, n);
-        if (n === this.minGames) this.candidateHashes.add(hashOf(sig));
+        if (n === this.minGames) this.candidateHashes.add(position);
       });
     }
   }
@@ -221,18 +224,15 @@ export class Aggregator {
     const ucis = splitMoves(game.moves);
     // At most openingPlies / 2 visits per game: linear scans beat sets here.
     const visited: Detail[] = [];
-    const played: [Detail, string][] = [];
     forEachTurn(ucis, game.color, this.openingPlies, (sig, pos, move, ply) => {
       const h = hashOf(sig);
       if (!this.candidateHashes.has(h)) return;
       const d = this.detailFor(h, sig, pos, game.color);
-      if (!played.some(([pd, pm]) => pd === d && pm === move)) {
-        played.push([d, move]);
-        d.moveGames.set(move, (d.moveGames.get(move) ?? 0) + 1);
-      }
-      // A repetition inside one game counts once: only the first visit is an occurrence.
+      // A repetition inside one game counts once: only the first visit is an occurrence, and only its
+      // move is counted, so every move count equals the occurrences with that move.
       if (visited.includes(d)) return;
       visited.push(d);
+      d.moveGames.set(move, (d.moveGames.get(move) ?? 0) + 1);
       d.games++;
       d.occurrences.push({ g: game.key, t: game.playedAt, s: game.speed, r: game.rated, o: game.outcome, m: move });
       if (isNewer(game.playedAt, game.key, d)) {

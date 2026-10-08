@@ -1,7 +1,7 @@
 // Live view filters over stored mistakes: counts, "k of n", impact and scores are recomputed from the
 // filtered occurrences, so a filter change never touches the engine or the training data.
 import { Chess } from 'chessops/chess';
-import { parseStandardUci, posKey, sanOf } from './chess';
+import { parseStandardUci, posKey, sanOfCached } from './chess';
 import { impactOf } from './classify';
 import type { OpeningBook, OpeningName } from './openings';
 import {
@@ -66,7 +66,7 @@ function matchesQuery(m: Mistake, query: string): boolean {
   if (q === m.move || q === m.bestMove) return true;
   const sanQuery = bareSan(q.replace(/^\d+\s*\.+\s*/, ''));
   if (!sanQuery) return false;
-  return [m.move, m.bestMove].some(uci => bareSan(sanOf(m.fen, uci)).startsWith(sanQuery));
+  return [m.move, m.bestMove].some(uci => bareSan(sanOfCached(m.fen, uci)).startsWith(sanQuery));
 }
 
 /** Filters that do not depend on occurrences (cheap ones first; the SAN query last). */
@@ -142,6 +142,20 @@ export interface OpeningSummaryRow {
 
 /** Plies whose book lookups are memoised by move prefix: a repertoire shares them across most games. */
 const SHARED_PLIES = 10;
+/** Games' deepest openings remembered per book (by the moves that decide it); cleared when full. */
+const DEEPEST_CACHE_MAX = 50_000;
+const deepestCache = new WeakMap<OpeningBook, Map<string, OpeningName | null>>();
+
+/** The first `plies` moves of a space-separated move list (the part deepestOpening reads). */
+function movesPrefix(moves: string, plies: number): string {
+  if (plies <= 0) return '';
+  let end = -1;
+  for (let i = 0; i < plies; i++) {
+    end = moves.indexOf(' ', end + 1);
+    if (end < 0) return moves;
+  }
+  return moves.slice(0, end);
+}
 
 /**
  * The deepest named book position within the first `plies` plies (stops at an illegal move).
@@ -200,8 +214,18 @@ export function openingsSummary(games: readonly StoredGame[], book: OpeningBook,
   }
   const groups = new Map<string, Group>();
   const byPrefix = new Map<string, OpeningName | null>();
+  // Games never change, so a game's opening is computed once per book: a re-render after a sync only
+  // looks up the new games.
+  let known = deepestCache.get(book);
+  if (!known) deepestCache.set(book, (known = new Map()));
   for (const g of games) {
-    const opening = deepestOpening(g.moves, book, openingPlies, byPrefix);
+    const moves = movesPrefix(g.moves, Math.max(0, openingPlies));
+    let opening = known.get(moves);
+    if (opening === undefined) {
+      opening = deepestOpening(moves, book, openingPlies, byPrefix) ?? null;
+      if (known.size >= DEEPEST_CACHE_MAX) known.clear();
+      known.set(moves, opening);
+    }
     if (!opening) continue;
     const id = `${g.color}|${opening.name}`;
     const group: Group = groups.get(id) ?? { color: g.color, name: opening.name, ecos: new Map(), outcomes: [] };

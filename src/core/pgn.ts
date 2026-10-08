@@ -88,6 +88,31 @@ function endsWithResult(s: string, start: number, end: number): boolean {
   return e > b && e - b <= 7 && (b === start || s.charCodeAt(b - 1) <= SPACE) && RESULTS.has(s.slice(b, e));
 }
 
+const LONE_CR = /\r(?!\n)/g;
+
+/**
+ * Turns lone CRs (classic Mac line endings) into LFs in a stream of text chunks; CRLF is left alone.
+ * A chunk's trailing CR is held back until the next chunk shows whether an LF follows it, so a CRLF
+ * split across two chunks is not read as two line breaks.
+ */
+export class LoneCrNormalizer {
+  private heldCr = false;
+
+  push(chunk: string): string {
+    let text = this.heldCr ? `\r${chunk}` : chunk;
+    this.heldCr = text.endsWith('\r');
+    if (this.heldCr) text = text.slice(0, -1);
+    return text.includes('\r') ? text.replace(LONE_CR, '\n') : text;
+  }
+
+  /** At the end of the input a held-back CR is a line break. */
+  flush(): string {
+    const rest = this.heldCr ? '\n' : '';
+    this.heldCr = false;
+    return rest;
+  }
+}
+
 /**
  * Incremental game splitter for huge files. Feed text chunks of any size (split anywhere, even inside
  * a CRLF pair); returns whole-game texts, trimmed of surrounding blank lines. Works line by line, so
@@ -111,12 +136,15 @@ export class PgnStreamSplitter {
   private prevBlank = false;
   private afterResult = false;
   private started = false;
+  /** Lines may end in LF, CRLF or a lone CR (old Mac files): lone CRs become LFs. */
+  private readonly cr = new LoneCrNormalizer();
 
   push(chunk: string): string[] {
     if (!this.started && chunk.length > 0) {
       this.started = true;
       if (chunk.charCodeAt(0) === BOM) chunk = chunk.slice(1);
     }
+    chunk = this.cr.push(chunk);
     if (!chunk.includes('\n')) {
       if (chunk) this.pending.push(chunk);
       return [];
@@ -128,7 +156,7 @@ export class PgnStreamSplitter {
 
   flush(): string[] {
     const out: string[] = [];
-    this.consume(this.joinTail(''), true, out);
+    this.consume(this.joinTail(this.cr.flush()), true, out);
     if (this.contentLength >= 0) this.emit('', out);
     this.tail = '';
     this.prevBlank = false;

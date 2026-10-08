@@ -1,7 +1,7 @@
 // PGN export of mistakes (Lichess study / Chessable import): one game per mistake, starting at the
 // mistake position, with the best move as the mainline and the habit move as a variation.
 import { formatLine, lineToSan, playUci } from './chess';
-import { explainLine } from './explain';
+import { explainMistake } from './explain';
 import type { Mistake, Severity } from './types';
 
 /** Plies of the best line and of the refutation line shown. */
@@ -54,7 +54,8 @@ const lineTokens = (sans: readonly string[], fen: string): string[] => (sans.len
 /** "(7. Ng5 $2 {Loses a pawn.} 7... d5 8. exd5)" as tokens. */
 function variationTokens(m: Mistake, sans: readonly string[]): string[] {
   const nag = NAGS[m.severity];
-  const explanation = explainLine(m.fen, m.playedLine, m.scorePlayed);
+  // Judged against the best line: material the best move gives up too is not the habit's fault.
+  const explanation = explainMistake(m);
   const after = playUci(m.fen, m.move) ?? m.fen;
   const tokens = [...lineTokens(sans.slice(0, 1), m.fen), nag];
   if (explanation) tokens.push(comment(`${explanation[0]!.toUpperCase()}${explanation.slice(1)}.`));

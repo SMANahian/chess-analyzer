@@ -18,5 +18,5 @@
     "noEmit": true,
     "types": ["vite/client", "vite-plugin-pwa/client"]
   },
-  "include": ["src", "e2e", "scripts/build-demo.ts", "scripts/gen-fixtures.d.mts", "vite.config.ts", "playwright.config.ts"]
+  "include": ["src", "e2e", "scripts/build-demo.ts", "scripts/gen-fixtures.d.mts", "vite.config.ts", "playwright.config.ts", "playwright.live.config.ts"]
 }

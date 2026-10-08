@@ -15,7 +15,7 @@ import type {
 import { addGames, getProfile, getSettings, getSyncStates, putSyncState, updateProfile } from '../db/repo';
 import { archiveMonth, chesscomArchives, fetchChesscomArchive, type ChesscomArchive } from '../sources/chesscom';
 import { MIN_RATE_LIMIT_MS, SourceError, isAbortError, throwIfAborted } from '../sources/http';
-import { fetchLichessGames, type LichessPage } from '../sources/lichess';
+import { fetchLichessGames, lichessUser, type LichessPage } from '../sources/lichess';
 import { readPgnFile } from '../sources/pgnFile';
 
 /** The first sync of a profile fetches this many games per account, analyses them, then backfills. */
@@ -81,6 +81,8 @@ interface AccountRun {
   fetched: number;
   /** New games stored for this account in this run. */
   added: number;
+  /** Lichess: the account's game count (count.all), looked up once per run; null = unknown. */
+  total?: number | null;
 }
 
 function emit(run: Run, patch: Partial<SyncProgress>): void {
@@ -135,12 +137,42 @@ function etaMessage(platform: string, pageFetched: number, expected: number | un
 }
 
 /**
+ * The account's game count from its Lichess profile (count.all), looked up once per run, for the
+ * download estimate; null when unknown. An abort, a rate limit or a network failure is thrown (the
+ * export would hit it as well); any other failure only leaves the count unknown.
+ */
+async function lichessTotal(run: Run, acc: AccountRun): Promise<number | null> {
+  if (acc.total !== undefined) return acc.total;
+  try {
+    const user = await lichessUser(acc.account.username, { signal: run.opts.signal, fetchImpl: run.opts.fetchImpl, now: run.now });
+    acc.total = user?.games ?? null;
+  } catch (err) {
+    if (isAbortError(err) || run.opts.signal?.aborted) throw err;
+    if (err instanceof SourceError && (err.kind === 'rate-limited' || err.kind === 'network')) throw err;
+    acc.total = null;
+  }
+  return acc.total;
+}
+
+/**
+ * Lines a newest-first request for `max` games will return: at most the games the account has that are
+ * not stored yet (count.all − stored), when the count is known. Undefined when nothing can be said.
+ */
+async function expectedLines(run: Run, acc: AccountRun, max: number): Promise<number | undefined> {
+  const total = await lichessTotal(run, acc);
+  const expected = total === null ? max : Math.min(max, Math.max(0, total - acc.state.stored));
+  return expected > 0 ? expected : undefined;
+}
+
+/**
  * Streams one export request into the store in chunks. The cursor covers every received line,
  * skipped games included. On an error the lines received so far (a contiguous run) are still stored.
+ * `expected` = lines this request should return, when known (progress bar and ETA).
  */
-async function lichessPage(run: Run, acc: AccountRun, page: LichessPage): Promise<PageResult> {
+async function lichessPage(run: Run, acc: AccountRun, page: LichessPage, expected?: number): Promise<PageResult> {
   const prevNewest = acc.state.newestCreatedAt ?? -Infinity;
-  const expected = page.sort === 'dateDesc' ? page.max : undefined;
+  // Progress reports `fetched` per account and run, so the expected count is on the same scale.
+  const expectedFetched = expected === undefined ? undefined : acc.fetched + expected;
   const result: PageResult = { received: 0, newLines: 0, maxCreatedAt: -Infinity };
   let games: StoredGame[] = [];
   let lo = Infinity;
@@ -154,7 +186,7 @@ async function lichessPage(run: Run, acc: AccountRun, page: LichessPage): Promis
     hi = -Infinity;
     await storeChunk(run, acc, chunk, next);
   };
-  emit(run, { account: acc.account, fetched: acc.fetched, expected, message: etaMessage('Lichess', 0, expected) });
+  emit(run, { account: acc.account, fetched: acc.fetched, expected: expectedFetched, message: etaMessage('Lichess', 0, expected) });
   const stream = fetchLichessGames(acc.account.username, page, { signal: run.opts.signal, fetchImpl: run.opts.fetchImpl, now: run.now });
   try {
     for await (const { raw, createdAt } of stream) {
@@ -186,8 +218,11 @@ async function markReachedStart(acc: AccountRun): Promise<void> {
 
 /**
  * First sync: newest games first (`dateDesc`, max = limit). Later syncs: a forward pass from the newest
- * stored game minus an overlap (`dateAsc`, so a capped or interrupted pass never leaves a gap), then a
- * backfill below the oldest stored game until gamesPerAccount is reached or the history ends.
+ * stored game minus an overlap (`dateAsc`, pages of `limit` games), which is not capped by the run
+ * limit: it continues while pages come back full, so after a long break every new game up to the
+ * newest is stored, and an interrupted pass never leaves a gap. Then, if the forward pass left some of
+ * the run's budget, a backfill below the oldest stored game until gamesPerAccount is reached or the
+ * history ends.
  */
 async function syncLichess(run: Run, acc: AccountRun): Promise<void> {
   let used = 0;
@@ -197,16 +232,17 @@ async function syncLichess(run: Run, acc: AccountRun): Promise<void> {
     const { reachedStart: _stale, ...uncovered } = acc.state;
     acc.state = uncovered;
     const max = Math.min(run.limit, run.perAccount);
-    const r = await lichessPage(run, acc, { sort: 'dateDesc', max });
+    const r = await lichessPage(run, acc, { sort: 'dateDesc', max }, await expectedLines(run, acc, max));
     used += r.received;
     if (r.received > 0 && r.received < max) await markReachedStart(acc);
   } else {
     let since = newest - LICHESS_OVERLAP_MS;
+    const max = run.limit;
     for (let i = 0; i < MAX_PAGES; i++) {
-      const r = await lichessPage(run, acc, { sort: 'dateAsc', since, max: run.limit });
+      const r = await lichessPage(run, acc, { sort: 'dateAsc', since, max });
       used += r.newLines;
-      // A full page of overlap duplicates must not stall the pass: continue after its last game.
-      if (r.received < run.limit || used >= run.limit || r.maxCreatedAt <= since) break;
+      // A full page may have more after it; a full page of overlap duplicates must not stall the pass.
+      if (r.received < max || r.maxCreatedAt <= since) break;
       since = r.maxCreatedAt;
     }
   }
@@ -214,7 +250,7 @@ async function syncLichess(run: Run, acc: AccountRun): Promise<void> {
     const oldest = acc.state.oldestCreatedAt;
     if (acc.state.reachedStart || oldest === undefined || acc.state.stored >= run.perAccount || used >= run.limit) break;
     const max = Math.min(run.perAccount - acc.state.stored, run.limit - used);
-    const r = await lichessPage(run, acc, { sort: 'dateDesc', until: oldest - 1, max });
+    const r = await lichessPage(run, acc, { sort: 'dateDesc', until: oldest - 1, max }, await expectedLines(run, acc, max));
     used += r.received;
     if (r.received < max) await markReachedStart(acc);
     if (r.received === 0) break;
@@ -242,7 +278,8 @@ function newestFirst(archive: ChesscomArchive): RawGame[] {
  */
 async function storeArchive(run: Run, acc: AccountRun, url: string, archive: ChesscomArchive, markDone: boolean): Promise<boolean> {
   const raws = newestFirst(archive);
-  emit(run, { account: acc.account, fetched: acc.fetched, expected: raws.length, message: `Chess.com: ${url.split('/games/')[1] ?? url}` });
+  // `fetched` counts per account and run, so the expected count is on the same scale.
+  emit(run, { account: acc.account, fetched: acc.fetched, expected: acc.fetched + raws.length, message: `Chess.com: ${url.split('/games/')[1] ?? url}` });
   const doneWith = (s: SyncState): SyncState => ({ ...s, doneArchives: [...new Set([...(s.doneArchives ?? []), url])] });
   if (raws.length === 0) {
     if (markDone) {

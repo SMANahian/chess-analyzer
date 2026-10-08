@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parsePgn } from 'chessops/pgn';
 import {
@@ -199,6 +200,41 @@ describe('PgnStreamSplitter', () => {
     expect(games[1]).toBe('[Event "next"]\n\n1. d4 *');
     // Quadratic re-scanning took several seconds here; the linear splitter takes a few ms.
     expect(ms).toBeLessThan(1000);
+  });
+
+  describe('line endings: LF, CRLF and lone CR (old Mac files) give the same games', () => {
+    const UPLOAD = readFileSync(new URL('../../e2e/fixtures/upload.pgn', import.meta.url), 'utf8');
+    const lf = UPLOAD.replace(/\r\n?/g, '\n');
+    const variants = { lf, crlf: lf.replace(/\n/g, '\r\n'), cr: lf.replace(/\n/g, '\r') };
+    const chunked = (text: string, size: number): string[] => Array.from({ length: Math.ceil(text.length / size) }, (_, i) => text.slice(i * size, (i + 1) * size));
+    const parsed = (games: string[]) => games.map(g => pgnGameToRaw(parsePgnGame(g, 40)));
+    const expected = parsed(splitPgnGames(lf));
+
+    it('upload.pgn has its 121 games (one of them not standard chess)', () => {
+      expect(expected).toHaveLength(121);
+      expect(expected.filter(g => g !== null)).toHaveLength(120);
+    });
+
+    for (const [name, text] of Object.entries(variants)) {
+      it(`${name}: chunk sizes 1, 7 and 4096`, () => {
+        for (const size of [1, 7, 4096]) expect(parsed(run(chunked(text, size))), `${name}, chunks of ${size}`).toEqual(expected);
+      });
+    }
+
+    it('a CRLF split exactly between its CR and its LF is one line break; a lone CR at a chunk end is one too', () => {
+      const crlf = variants.crlf;
+      const at = crlf.indexOf('\r\n') + 1;
+      expect(parsed(run([crlf.slice(0, at), crlf.slice(at)]))).toEqual(expected);
+      // A blank line split as CR | LF CR | LF must still separate the games.
+      const blank = crlf.indexOf('\r\n\r\n');
+      expect(parsed(run([crlf.slice(0, blank + 1), crlf.slice(blank + 1, blank + 3), crlf.slice(blank + 3)]))).toEqual(expected);
+      const cr = variants.cr;
+      const lone = cr.indexOf('\r') + 1;
+      expect(parsed(run([cr.slice(0, lone), '', cr.slice(lone)]))).toEqual(expected);
+      // The file ends in a lone CR: flushed as a line break.
+      expect(run(['[Event "x"]\r\r1. e4 *\r'])).toEqual(['[Event "x"]\n\n1. e4 *']);
+      expect(splitPgnGames('1. e4 e5 1-0\r\r1. d4 *')).toEqual(['1. e4 e5 1-0', '1. d4 *']);
+    });
   });
 
   it('can be reused after flush and ignores empty chunks', () => {

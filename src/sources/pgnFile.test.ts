@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { contentKey } from '../core/games';
 import type { RawGame } from '../core/types';
@@ -156,6 +157,35 @@ describe('readPgnFile', () => {
   it('handles empty and non-PGN input', async () => {
     expect(await readAll('')).toEqual({ games: [], counts: { games: 0, skipped: 0 } });
     expect(await readAll('just some text\nnot a game')).toEqual({ games: [], counts: { games: 0, skipped: 1 } });
+  });
+});
+
+describe('PGN files with classic Mac (CR-only) line endings', () => {
+  const UPLOAD = readFileSync(new URL('../../e2e/fixtures/upload.pgn', import.meta.url), 'utf8').replace(/\r\n?/g, '\n');
+  const CR_ONLY = UPLOAD.replace(/\n/g, '\r');
+
+  async function readAll(input: Blob | string): Promise<{ games: RawGame[]; counts: PgnReadCounts }> {
+    const games: RawGame[] = [];
+    const it = readPgnFile(input);
+    for (let r = await it.next(); ; r = await it.next()) {
+      if (r.done) return { games, counts: r.value };
+      games.push(r.value);
+    }
+  }
+
+  it('imports every game, as from the LF file', async () => {
+    const lf = await readAll(new Blob([UPLOAD]));
+    expect(lf.counts).toEqual({ games: 120, skipped: 1 });
+    const cr = await readAll(new Blob([CR_ONLY]));
+    expect(cr.counts).toEqual(lf.counts);
+    expect(cr.games).toEqual(lf.games);
+  });
+
+  it('lists the same player names, reading line by line', async () => {
+    const names = await scanPgnFileNames(new Blob([UPLOAD]), 5);
+    expect(names[0]!.games).toBeGreaterThan(100);
+    expect(await scanPgnFileNames(new Blob([CR_ONLY]), 5)).toEqual(names);
+    expect(await scanPgnFileNames(CR_ONLY.replace(/\r/g, '\r\n'), 5)).toEqual(names);
   });
 });
 

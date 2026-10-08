@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { readFileSync } from 'node:fs';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { START_FEN, playUci, posFromFen, posKey, sansToUci } from '../core/chess';
 import { OpeningBook, type OpeningsJson } from '../core/openings';
 import { DEFAULT_SETTINGS, type AnalysisProgress, type Mistake } from '../core/types';
@@ -260,8 +260,134 @@ describe('analyzeProfile', () => {
     await analyzeProfile(id, { pool, book, now, onMistakes: ms => batches.push({ size: ms.length, callsSoFar: pool.calls.length }) });
     expect(batches.length).toBeGreaterThan(1);
     expect(batches[0]!.callsSoFar).toBeLessThan(pool.calls.length);
-    // The final batch carries every mistake with its dependency links.
-    expect(batches.at(-1)!.size).toBe(2);
+    // The final batch carries only the rows whose dependency link changed (5.Nxf7 now depends on 4.Nxe5).
+    expect(batches.at(-1)!.size).toBe(1);
+  });
+});
+
+describe('dependency links', () => {
+  /** Black falls for the trap: 3...Nd4 then 4...Qg5 (which only arises after 3...Nd4). */
+  const TRAP_BLACK = 'e4 e5 Nf3 Nc6 Bc4 Nd4 Nxe5 Qg5 Nxf7 Qxg2';
+  const AFTER_BC4 = fenAt('e4 e5 Nf3 Nc6 Bc4');
+  const AFTER_NXE5 = fenAt('e4 e5 Nf3 Nc6 Bc4 Nd4 Nxe5');
+  const SICILIAN = fenAt('e4 c5 Nf3 d6 d4');
+  const BLACK_TABLE: ScoreTable = { [keyOf(AFTER_BC4)]: { c6d4: -150, f8c5: 30 }, [keyOf(AFTER_NXE5)]: { d8g5: -300, d4e6: -100 } };
+
+  async function blackTrapProfile(): Promise<string> {
+    const id = (await repo.createProfile({ name: 'Hero', kind: 'self', accounts: [], aliases: [] })).id;
+    const games = [0, 1, 2].map(i => storedGame(id, `t${i}`, TRAP_BLACK, 'black', NOW - i * DAY));
+    games.push(...[0, 1].map(i => storedGame(id, `s${i}`, 'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6', 'black', NOW - i * DAY)));
+    await repo.addGames(games.map((g, i) => ({ ...g, contentKey: `${g.contentKey}#${i}` })));
+    return id;
+  }
+
+  it('an incomplete run (one unrelated position fails) keeps the stored links of the rows it rewrites', async () => {
+    const id = await blackTrapProfile();
+    expect((await analyzeProfile(id, { pool: new FakePool(1, BLACK_TABLE), book, now })).complete).toBe(true);
+    const child = (await repo.getMistakes(id)).find(m => m.move === 'd8g5')!;
+    const parent = (await repo.getMistakes(id)).find(m => m.move === 'c6d4')!;
+    expect(child.dependsOn).toBe(parent.id);
+
+    // A re-analysis at other depths (preset change), with an engine failure on an unrelated position.
+    await repo.saveSettings({ preset: 'thorough' });
+    const failing = new FakePool(1, BLACK_TABLE);
+    failing.failOn.add(keyOf(SICILIAN));
+    const r2 = await analyzeProfile(id, { pool: failing, book, now });
+    expect(r2.complete).toBe(false);
+    const rewritten = (await repo.getMistakes(id)).find(m => m.move === 'd8g5')!;
+    expect(rewritten.evalDepth).toBe(18);
+    expect(rewritten.dependsOn).toBe(parent.id);
+  });
+
+  it('a complete run removes a link that no longer applies, and rewrites only the rows whose link changed', async () => {
+    const id = await trapProfile();
+    await analyzeProfile(id, { pool: new FakePool(2, TABLE), book, now });
+    expect((await repo.getMistakes(id)).find(m => m.id === p2Id(id))!.dependsOn).toBe(p1Id(id));
+
+    // The engine changes its mind about 4.Nxe5: no longer a mistake, so 5.Nxf7 has no parent any more.
+    await engineSays(FINE);
+    const spy = vi.spyOn(repo, 'upsertMistakes');
+    const reported: Mistake[][] = [];
+    try {
+      const result = await analyzeProfile(id, { pool: new FakePool(2, TABLE), book, now, onMistakes: ms => reported.push(ms) });
+      expect(result).toMatchObject({ mistakes: 1, complete: true });
+      const linkWrites = spy.mock.calls.filter(([, opts]) => opts?.keepLinks !== true);
+      expect(linkWrites.map(([rows]) => rows.map(m => m.id))).toEqual([[p2Id(id)]]);
+      expect(spy.mock.calls.filter(([, opts]) => opts?.keepLinks === true).flatMap(([rows]) => rows.map(m => m.id))).toEqual([p2Id(id)]);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(reported.at(-1)!.map(m => [m.id, m.dependsOn])).toEqual([[p2Id(id), undefined]]);
+    const rows = await repo.getMistakes(id);
+    expect(rows.map(m => m.id)).toEqual([p2Id(id)]);
+    expect(rows[0]!.dependsOn).toBeUndefined();
+
+    // A run that changes no link writes no extra rows.
+    const again = vi.spyOn(repo, 'upsertMistakes');
+    try {
+      await analyzeProfile(id, { pool: new FakePool(2, TABLE), book, now });
+      expect(again.mock.calls.filter(([, opts]) => opts?.keepLinks !== true)).toEqual([]);
+    } finally {
+      again.mockRestore();
+    }
+  });
+});
+
+describe('progress estimate', () => {
+  it('is based on the remaining searches, not positions: the first estimate is close although the first position costs most', async () => {
+    const id = (await repo.createProfile({ name: 'Hero', kind: 'self', accounts: [], aliases: [] })).id;
+    // White plays ten different first moves (4 games each), then always h4 and Rh3: one costly position
+    // first (most games, ten moves), then twenty cheap ones (one move each).
+    const firsts = ['a3', 'b3', 'c3', 'd3', 'e3', 'f3', 'g3', 'Nc3', 'Nf3', 'c4'];
+    const games = firsts.flatMap((first, i) =>
+      [0, 1, 2, 3].map(j => storedGame(id, `g${i}-${j}`, `${first} a6 h4 a5 Rh3`, 'white', NOW - (i * 4 + j) * 60_000)),
+    );
+    await repo.addGames(games.map((g, i) => ({ ...g, contentKey: `${g.contentKey}#${i}` })));
+    let clock = 1_000;
+    const pool = new FakePool(1);
+    // Each search costs 10 ms of the fake clock: a position with n moves costs (n + 1) searches.
+    pool.onCall = call => {
+      clock += 10 * (call.moves.length + 1);
+    };
+    const reports: { at: number; etaMs: number }[] = [];
+    const result = await analyzeProfile(id, {
+      pool,
+      book,
+      now,
+      clock: () => clock,
+      onProgress: p => {
+        if (p.phase === 'evaluating' && p.etaMs !== undefined) reports.push({ at: clock, etaMs: p.etaMs });
+      },
+    });
+    expect(result).toMatchObject({ positions: 21, complete: true });
+    const end = clock;
+    const first = reports[0]!;
+    const remaining = end - first.at;
+    expect(remaining).toBeGreaterThan(0);
+    expect(first.etaMs).toBeGreaterThanOrEqual(remaining / 2);
+    expect(first.etaMs).toBeLessThanOrEqual(remaining * 2);
+    // Every estimate stays within 2× of the truth.
+    for (const r of reports.filter(r => end - r.at > 0)) expect(r.etaMs / (end - r.at)).toBeLessThanOrEqual(2);
+  });
+
+  it('gives no estimate before the first result of every engine lane is in', async () => {
+    const id = await trapProfile();
+    let clock = 0;
+    const pool = new FakePool(4, TABLE);
+    pool.onCall = () => {
+      clock += 50;
+    };
+    const etas: { engineEvals: number; etaMs: number }[] = [];
+    await analyzeProfile(id, {
+      pool,
+      book,
+      now,
+      clock: () => clock,
+      onProgress: p => {
+        if (p.phase === 'evaluating' && p.etaMs !== undefined) etas.push({ engineEvals: p.engineEvals, etaMs: p.etaMs });
+      },
+    });
+    expect(etas.every(e => e.engineEvals >= 4)).toBe(true);
   });
 });
 

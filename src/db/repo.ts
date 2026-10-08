@@ -231,10 +231,14 @@ export async function getMistakeByShortId(shortId: string, profileId?: string): 
   return profileId === undefined ? rows[0] : rows.find(m => m.profileId === profileId);
 }
 
-/** A fresh analysis row merged onto the stored one: user decisions and history survive re-analysis. */
-function mergeMistake(fresh: Mistake, old: Mistake | undefined): Mistake {
+/**
+ * A fresh analysis row merged onto the stored one: user decisions and history survive re-analysis.
+ * With `keepLinks`, a fresh row without a link (dependsOn) keeps the stored one.
+ */
+function mergeMistake(fresh: Mistake, old: Mistake | undefined, keepLinks: boolean): Mistake {
   if (!old) return fresh;
   const merged: Mistake = { ...fresh, status: old.status, createdAt: old.createdAt };
+  if (keepLinks && fresh.dependsOn === undefined && old.dependsOn !== undefined) merged.dependsOn = old.dependsOn;
   delete merged.dormant;
   if (old.ignoreReason !== undefined) merged.ignoreReason = old.ignoreReason;
   else delete merged.ignoreReason;
@@ -248,13 +252,18 @@ function mergeMistake(fresh: Mistake, old: Mistake | undefined): Mistake {
 /**
  * Merges analysis output: preserves status, ignoreReason, snoozedUntil, createdAt (and an earlier
  * refutation) of existing rows and clears `dormant`. Returns the rows as stored.
+ *
+ * `keepLinks`: the rows were not linked (rows streamed during an analysis, before dependencies are
+ * computed), so a stored dependsOn stays when the fresh row has none. Without it the fresh rows' links
+ * are written as they are, so a link that no longer applies is removed.
  */
-export async function upsertMistakes(ms: readonly Mistake[]): Promise<Mistake[]> {
+export async function upsertMistakes(ms: readonly Mistake[], opts: { keepLinks?: boolean } = {}): Promise<Mistake[]> {
   if (ms.length === 0) return [];
   const db = getDb();
+  const keepLinks = opts.keepLinks === true;
   return db.transaction('rw', db.mistakes, async () => {
     const old = await db.mistakes.bulkGet(ms.map(m => m.id));
-    const merged = ms.map((m, i) => mergeMistake(m, old[i]));
+    const merged = ms.map((m, i) => mergeMistake(m, old[i], keepLinks));
     await db.mistakes.bulkPut(merged);
     return merged;
   });

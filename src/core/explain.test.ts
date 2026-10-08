@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { START_FEN, playUci, sanToUciAt, sansToUci } from './chess';
-import { explainLine, materialSwing } from './explain';
+import { explainLine, explainMistake, materialSwing } from './explain';
 
 const fenAfter = (sans: string): string => sansToUci(sans.split(' '), 40).reduce((fen, uci) => playUci(fen, uci)!, START_FEN);
 /** SAN moves played from `fen` → standard UCI. */
@@ -92,6 +92,79 @@ describe('explainLine', () => {
     expect(explainLine('4k3/8/8/8/8/8/1p6/4K3 w - - 0 1', ['e1e2', 'b2b1q'])).toBe('loses material');
     // Both: White's queen is taken after Black promotes.
     expect(explainLine('4k3/8/8/8/8/8/1p6/2Q1K3 w - - 0 1', ['c1c2', 'b2b1q', 'e1e2', 'b1c2'])).toBe('loses the queen');
+  });
+
+  it('without a best line, keeps judging the line alone', () => {
+    const fen = fenAfter('e4 e5 Nf3 Nc6');
+    const line = ucis(fen, 'Ng5 Qxg5 Nc3 Nf6');
+    expect(explainLine(fen, line, undefined, undefined)).toBe('loses a piece');
+    expect(explainLine(fen, line, undefined, [])).toBe('loses a piece');
+  });
+
+  it('says nothing about material that was lost anyway (the best line gives it up too)', () => {
+    // 1.e4 c5 2.Nf3 c4 3.h4: the c4 pawn falls after 3...Qa5 4.Bxc4 and after the best 3...e6 4.Bxc4 alike.
+    const fen = 'rnbqkbnr/pp1ppppp/8/8/2p1P2P/5N2/PPPP1PP1/RNBQKB1R b KQkq - 0 3';
+    const played = ['d8a5', 'f1c4', 'd7d6', 'e1g1', 'g8f6', 'b1c3', 'c8g4', 'd2d4', 'e7e6'];
+    const best = ['e7e6', 'f1c4', 'd7d5', 'c4b5', 'b8c6', 'b1c3', 'd5e4', 'c3e4', 'f7f5'];
+    expect(materialSwing(fen, played)).toBe(-1);
+    expect(materialSwing(fen, best)).toBe(-1);
+    expect(explainLine(fen, played, { cp: -302 })).toBe('loses a pawn');
+    expect(explainLine(fen, played, { cp: -302 }, best, { cp: -156 })).toBe('');
+  });
+
+  it('describes only what the line loses beyond the best line', () => {
+    // 1.e4 c5 2.Nf3 c4 3.Qe2: 3...g5? 4.Nxg5 loses the g-pawn and then c4; the best 3...e6 only the c-pawn (traded back on d5).
+    const fen = 'rnbqkbnr/pp1ppppp/8/8/2p1P3/5N2/PPPPQPPP/RNB1KB1R b KQkq - 1 3';
+    const played = ['g7g5', 'f3g5', 'e7e6', 'e2h5', 'd8e7', 'f1c4', 'd7d5', 'c4b5'];
+    const best = ['e7e6', 'e2c4', 'd7d5', 'e4d5', 'e6d5', 'c4b3', 'g8f6', 'f1b5'];
+    expect(materialSwing(fen, played)).toBe(-2);
+    expect(materialSwing(fen, best)).toBe(-1);
+    expect(explainLine(fen, played)).toBe('loses two pawns');
+    expect(explainLine(fen, played, undefined, best)).toBe('loses a pawn');
+  });
+
+  it('still names a piece that really hangs, and does not count a gain of the best line as a loss', () => {
+    const fen = fenAfter('e4 e5 Nf3 Nc6');
+    // 3.Ng5?? Qxg5 against 3.Bc4 Nf6 4.d3.
+    expect(explainLine(fen, ucis(fen, 'Ng5 Qxg5 Nc3 Nf6'), undefined, ucis(fen, 'Bc4 Nf6 d3 Bc5'))).toBe('loses a piece');
+    // The best line wins a pawn (3.Nxe5?), the played line loses nothing: not "loses a pawn".
+    const hanging = fenAfter('e4 e5 Nf3 Nc6 Nc3 Nd4');
+    expect(materialSwing(hanging, ucis(hanging, 'Nxe5'))).toBe(1);
+    expect(explainLine(hanging, ucis(hanging, 'd3 Nxf3+ Qxf3'), undefined, ucis(hanging, 'Nxe5'))).toBe('');
+  });
+
+  it('keeps "allows mate" unless the best line allows mate too', () => {
+    const fen = fenAfter('e4 e5 Bc4 Nc6 Qh5');
+    const mated = ucis(fen, 'Nf6 Qxf7#');
+    expect(explainLine(fen, mated, undefined, ucis(fen, 'g6 Qf3 Nf6'), { cp: -20 })).toBe('allows mate');
+    expect(explainLine(fen, ucis(fen, 'g6'), { mate: -5 }, ucis(fen, 'Qe7'), { mate: -7 })).toBe('');
+  });
+
+  it('explainMistake judges the habit line against the best line', () => {
+    const base = {
+      fen: 'rnbqkbnr/pp1ppppp/8/8/2p1P2P/5N2/PPPP1PP1/RNBQKB1R b KQkq - 0 3',
+      move: 'd8a5',
+      bestMove: 'e7e6',
+      playedLine: ['d8a5', 'f1c4', 'd7d6', 'e1g1', 'g8f6', 'b1c3', 'c8g4'],
+      bestLine: ['e7e6', 'f1c4', 'd7d5', 'c4b5', 'b8c6', 'b1c3', 'd5e4', 'c3e4'],
+      scorePlayed: { cp: -302 },
+      scoreBest: { cp: -156 },
+    };
+    expect(explainMistake(base)).toBe('');
+    // A best line that does not start with the best move is not used as the baseline.
+    expect(explainMistake({ ...base, bestLine: ['g8f6'] })).toBe('loses a pawn');
+    const knights = fenAfter('e4 e5 Nf3 Nc6');
+    expect(
+      explainMistake({
+        fen: knights,
+        move: 'f3g5',
+        bestMove: 'f1c4',
+        playedLine: ucis(knights, 'Ng5 Qxg5 Nc3 Nf6'),
+        bestLine: ucis(knights, 'Bc4 Nf6 d3 Bc5'),
+        scorePlayed: { cp: -400 },
+        scoreBest: { cp: 40 },
+      }),
+    ).toBe('loses a piece');
   });
 
   it('says nothing for equal trades, gains, empty lines or invalid input', () => {

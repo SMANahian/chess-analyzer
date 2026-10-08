@@ -182,6 +182,25 @@ describe('mistakes', () => {
     expect(await repo.getMistakes(id)).toEqual([stored]);
   });
 
+  it('upsertMistakes with keepLinks keeps a stored dependsOn when the fresh row has none; by default the fresh link is written as is', async () => {
+    const id = await newSelf();
+    const parent = testMistake(id, START_FEN, 'f2f3');
+    await repo.upsertMistakes([testMistake(id, AFTER_E4, 'c7c5', { dependsOn: parent.id, count: 2 })]);
+    const unlinked = testMistake(id, AFTER_E4, 'c7c5', { count: 5 });
+
+    const [kept] = await repo.upsertMistakes([unlinked], { keepLinks: true });
+    expect(kept).toMatchObject({ dependsOn: parent.id, count: 5 });
+    expect((await repo.getMistakes(id))[0]!.dependsOn).toBe(parent.id);
+    // A fresh link replaces the stored one either way.
+    const [relinked] = await repo.upsertMistakes([{ ...unlinked, dependsOn: 'other' }], { keepLinks: true });
+    expect(relinked!.dependsOn).toBe('other');
+
+    // Without keepLinks (the linked rows of a complete analysis) a link that no longer applies is removed.
+    const [cleared] = await repo.upsertMistakes([unlinked]);
+    expect(cleared!.dependsOn).toBeUndefined();
+    expect((await repo.getMistakes(id))[0]!.dependsOn).toBeUndefined();
+  });
+
   it('upsertMistakes inserts new rows as given', async () => {
     const id = await newSelf();
     const m = testMistake(id, AFTER_E4, 'c7c5');

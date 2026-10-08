@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
-import { START_FEN, playUci, posFromFen, posKey, sansToUci } from './chess';
+import { Chess } from 'chessops/chess';
+import { describe, expect, it, vi } from 'vitest';
+import { START_FEN, playUci, posFromFen, posKey, sanOf, sanOfCached, sansToUci } from './chess';
 import { impactOf } from './classify';
 import { applyFilters, filterOccurrences, meanScore, openingsSummary } from './filters';
 import { OpeningBook, type OpeningsJson } from './openings';
@@ -154,6 +155,24 @@ describe('applyFilters: listing rules', () => {
     expect(q('Qh5')).toEqual([]);
     expect(q('  ')).toHaveLength(2);
   });
+
+  it('remembers the SAN of the moves: searching again does not parse the positions again', () => {
+    const ms = Array.from({ length: 30 }, (_, i) => mistake({ id: `m${i}`, fen: i % 2 ? TWO_KNIGHTS : fenAfter('e4 e5 Nf3 Nc6 Bc4 Bc5') }));
+    // A query matching the best move needs both moves' SAN (the habit is tried first).
+    const first = ids(applyFilters(ms, filters({ query: 'd3' }), NOW));
+    expect(first).toHaveLength(30);
+    const parses = vi.spyOn(Chess, 'fromSetup');
+    try {
+      expect(ids(applyFilters(ms, filters({ query: 'Ng5' }), NOW))).toEqual(first);
+      expect(ids(applyFilters(ms, filters({ query: 'Ng' }), NOW))).toEqual(first);
+      expect(ids(applyFilters(ms, filters({ query: 'd3' }), NOW))).toEqual(first);
+      expect(parses).not.toHaveBeenCalled();
+    } finally {
+      parses.mockRestore();
+    }
+    expect(sanOfCached(TWO_KNIGHTS, 'f3g5')).toBe(sanOf(TWO_KNIGHTS, 'f3g5'));
+    expect(sanOfCached(TWO_KNIGHTS, 'e1e8')).toBe('');
+  });
 });
 
 describe('applyFilters: live counts', () => {
@@ -272,5 +291,30 @@ describe('openingsSummary', () => {
     const games = [g('e4 e5 Nf3 Nc6 Bb5 a6 Ba4', 'white', 'win')];
     expect(openingsSummary(games, book, 1)[0]).toMatchObject({ name: "King's Pawn Game", eco: 'B00' });
     expect(openingsSummary(games, book, 0)).toEqual([]);
+    expect(openingsSummary(games, book, 20)[0]).toMatchObject({ name: 'Ruy Lopez: Morphy Defense' });
+  });
+
+  it('remembers each game’s opening: the same rows from a warm cache, without book lookups', () => {
+    const lines = ['e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7', 'd4 d5 c4 e6 Nc3 Nf6', 'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 a6', 'Nf3 d5 d4', 'c4 e5'];
+    const games = Array.from({ length: 60 }, (_, i) => g(lines[i % lines.length]!, i % 3 ? 'white' : 'black', (['win', 'loss', 'draw'] as const)[i % 3]!));
+    const freshBook = (): OpeningBook =>
+      OpeningBook.fromJson(JSON.parse(readFileSync(new URL('../../public/data/openings.json', import.meta.url), 'utf8')) as OpeningsJson);
+    const warm = freshBook();
+    const cold = openingsSummary(games, warm, 20);
+    const lookups = vi.spyOn(warm, 'lookup');
+    try {
+      expect(openingsSummary(games, warm, 20)).toEqual(cold);
+      expect(lookups).not.toHaveBeenCalled();
+      // New games (after a sync) are the only ones looked up.
+      const more = [...games, g('e4 e6 d4 d5 e5 c5', 'white', 'win')];
+      const rows = openingsSummary(more, warm, 20);
+      expect(lookups.mock.calls.length).toBeGreaterThan(0);
+      expect(lookups.mock.calls.length).toBeLessThanOrEqual(6);
+      expect(rows).toEqual(openingsSummary(more, freshBook(), 20));
+    } finally {
+      lookups.mockRestore();
+    }
+    // Another ply limit is another question: computed, not taken from the cache.
+    expect(openingsSummary(games, warm, 2)).toEqual(openingsSummary(games, freshBook(), 2));
   });
 });

@@ -303,6 +303,24 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
 };
 
+/**
+ * The values the Settings page offers. Settings from outside (a backup file) are sanitised to these
+ * (db/backup.ts sanitizeSettings). Ranges are inclusive; `step` is the RangeField step.
+ */
+export const SETTING_RANGES = {
+  openingPlies: { min: 10, max: 40, step: 2 },
+  sessionSize: { min: 5, max: 30, step: 1 },
+  newPerDay: { min: 0, max: 20, step: 1 },
+  replayPlies: { min: 0, max: 12, step: 1 },
+  /** 0 = automatic; the pool never uses more workers than there are cores. */
+  engineWorkers: { min: 0, max: 32, step: 1 },
+} as const;
+/** Confirm-depth choices (0 = from the preset). */
+export const DEPTH_OVERRIDE_OPTIONS: readonly number[] = [0, 8, 10, 12, 14, 16, 18, 20, 22];
+export const GAMES_PER_ACCOUNT_OPTIONS: readonly number[] = [300, 1000, 3000, 10000];
+export const ANALYSIS_PRESETS: readonly AnalysisPreset[] = ['quick', 'standard', 'thorough'];
+export const THEMES: readonly Settings['theme'][] = ['system', 'light', 'dark'];
+
 /** Live view filters (UI state, persisted in localStorage; never trigger re-analysis). */
 export interface ViewFilters {
   color: Color | 'both';
@@ -341,7 +359,7 @@ export interface SyncProgress {
   fetched: number;
   /** New games stored in this run (all accounts). */
   added: number;
-  /** Expected games for the current request, when known (for ETA). */
+  /** What `fetched` should reach when the current request ends, when known (progress bar and ETA). */
   expected?: number;
   /** ms epoch when a rate-limit cooldown ends. */
   cooldownUntil?: number;
