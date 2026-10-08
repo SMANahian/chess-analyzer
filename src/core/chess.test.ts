@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { Chess } from 'chessops/chess';
+import { Chess, castlingSide } from 'chessops/chess';
 import { parseSan } from 'chessops/san';
+import { kingCastlesTo, makeSquare, makeUci } from 'chessops/util';
+import type { SquareName } from 'chessops/types';
 import {
   START_FEN,
   formatLine,
   groundDests,
+  isStandardStartFen,
   lineToSan,
   materialBalance,
   moveFromGround,
@@ -18,6 +21,7 @@ import {
   sanOf,
   sanToUciAt,
   sansToUci,
+  toStandardUci,
 } from './chess';
 import { fnv1a64, shortId } from './hash';
 
@@ -56,6 +60,59 @@ describe('castling normalisation', () => {
     expect(moveFromGround(pos, 'e1', 'h1')).toBe('e1g1');
     expect(moveFromGround(pos, 'e1', 'g1')).toBe('e1g1');
     expect(groundDests(pos).get('e1')).toEqual(expect.arrayContaining(['g1', 'h1', 'c1', 'a1']));
+  });
+});
+
+describe('UCI parsing (property test on random games)', () => {
+  /** Every legal move in both accepted spellings → its standard UCI (chessops' king→rook castling included). */
+  function legalUcis(pos: Chess): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const [from, tos] of pos.allDests()) {
+      for (const to of tos) {
+        const side = castlingSide(pos, { from, to });
+        const promotes = pos.board.getRole(from) === 'pawn' && (to >> 3 === 0 || to >> 3 === 7);
+        if (side) {
+          const standard = makeSquare(from) + makeSquare(kingCastlesTo(pos.turn, side));
+          out.set(makeUci({ from, to }), standard).set(standard, standard);
+        } else if (promotes) {
+          for (const r of 'qrbn') out.set(makeUci({ from, to }) + r, makeUci({ from, to }) + r);
+        } else {
+          out.set(makeUci({ from, to }), makeUci({ from, to }));
+        }
+      }
+    }
+    return out;
+  }
+
+  it('accepts exactly the legal moves, from every own piece to every square', () => {
+    let seed = 4242;
+    const rand = (n: number): number => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) % n;
+    const wrong: string[] = [];
+    for (let game = 0; game < 6; game++) {
+      const pos = Chess.default();
+      for (let ply = 0; ply < 50 && !pos.isEnd(); ply++) {
+        const legal = legalUcis(pos);
+        for (const from of pos.board[pos.turn]) {
+          for (let to = 0; to < 64; to++) {
+            for (const suffix of ['', 'q', 'n', 'k']) {
+              const uci = makeSquare(from) + makeSquare(to) + suffix;
+              const move = parseStandardUci(pos, uci);
+              if ((move && toStandardUci(pos, move)) !== legal.get(uci)) wrong.push(`${posKey(pos)} ${uci}`);
+            }
+          }
+        }
+        for (const [orig, dests] of groundDests(pos)) {
+          for (const dest of dests) {
+            if (!legal.has(moveFromGround(pos, orig, dest as SquareName, 'knight') ?? '')) wrong.push(`${posKey(pos)} ground ${orig}${dest}`);
+          }
+        }
+        // Castle whenever possible half of the time, so positions with castling rights get covered.
+        const ucis = [...legal.values()];
+        const castle = ucis.find(u => /^e[18][gc][18]$/.test(u) && pos.board.getRole(parseStandardUci(pos, u)!.from) === 'king');
+        pos.play(parseStandardUci(pos, castle && rand(2) ? castle : ucis[rand(ucis.length)]!)!);
+      }
+    }
+    expect(wrong).toEqual([]);
   });
 });
 
@@ -105,6 +162,19 @@ describe('replay', () => {
     expect(steps[0]!.fen).toBe(START_FEN);
     expect(steps[1]!.turn).toBe('black');
     expect(replay(['e2e4', 'e7e5', 'g1f3'], 2)).toHaveLength(2);
+  });
+});
+
+describe('isStandardStartFen', () => {
+  it('accepts the start position in any spelling and rejects everything else', () => {
+    expect(isStandardStartFen(START_FEN)).toBe(true);
+    expect(isStandardStartFen(' rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR  w KQkq - 0 1 ')).toBe(true);
+    expect(isStandardStartFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -')).toBe(true);
+    expect(isStandardStartFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w HAha - 0 1')).toBe(true);
+    expect(isStandardStartFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1')).toBe(false);
+    expect(isStandardStartFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1')).toBe(false);
+    expect(isStandardStartFen('bqnbrkrn/pppppppp/8/8/8/8/PPPPPPPP/BQNBRKRN w KQkq - 0 1')).toBe(false);
+    expect(isStandardStartFen('garbage')).toBe(false);
   });
 });
 

@@ -1,0 +1,64 @@
+{
+  "id": "sma-nahian",
+  "username": "SMA-Nahian",
+  "perfs": {
+    "bullet": {
+      "games": 412,
+      "rating": 1544,
+      "rd": 61,
+      "prog": 12
+    },
+    "blitz": {
+      "games": 1630,
+      "rating": 1612,
+      "rd": 48,
+      "prog": -8
+    },
+    "rapid": {
+      "games": 251,
+      "rating": 1633,
+      "rd": 70,
+      "prog": 21
+    },
+    "classical": {
+      "games": 12,
+      "rating": 1650,
+      "rd": 110,
+      "prog": 0,
+      "prov": true
+    },
+    "correspondence": {
+      "games": 3,
+      "rating": 1500,
+      "rd": 230,
+      "prog": 0,
+      "prov": true
+    }
+  },
+  "flair": "activity.lichess-horsey",
+  "createdAt": 1552558951000,
+  "seenAt": 1727809331000,
+  "playTime": {
+    "total": 1981234,
+    "tv": 0
+  },
+  "url": "https://lichess.org/@/SMA-Nahian",
+  "count": {
+    "all": 2342,
+    "rated": 2209,
+    "ai": 21,
+    "draw": 140,
+    "drawH": 139,
+    "loss": 1077,
+    "lossH": 1070,
+    "win": 1125,
+    "winH": 1112,
+    "bookmark": 0,
+    "playing": 0,
+    "import": 0,
+    "me": 0
+  },
+  "followable": true,
+  "following": false,
+  "blocking": false
+}

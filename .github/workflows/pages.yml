@@ -1,0 +1,94 @@
+name: Deploy to GitHub Pages
+
+# One-time setup by the repository owner: Settings → Pages → Build and deployment → Source: "GitHub Actions".
+# Only the default branch deploys: the github-pages environment rejects other branches by default.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a queued run waits instead of cancelling a deployment in progress.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      wasm: ${{ steps.engine.outputs.wasm }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Locate the engine binary
+        id: engine
+        run: |
+          wasm="$(cd dist && ls engine/*.wasm | head -n 1)"
+          test -n "$wasm"
+          echo "wasm=$wasm" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      # A wasm served with any other content type makes the engine fail silently in the browser
+      # (WebAssembly.instantiateStreaming has no fallback), so check what Pages actually serves.
+      - name: Smoke-test the deployed site
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          WASM_PATH: ${{ needs.build.outputs.wasm }}
+        run: |
+          base="${PAGE_URL%/}/"
+          wasm_url="${base}${WASM_PATH}"
+          ok=""
+          for attempt in 1 2 3 4 5 6; do
+            headers="$(curl -sSIL --max-time 30 "$wasm_url" | tr -d '\r' || true)"
+            status="$(printf '%s\n' "$headers" | awk '/^HTTP\// { code = $2 } END { print code }')"
+            type="$(printf '%s\n' "$headers" | awk -F': *' 'tolower($1) == "content-type" { t = tolower($2) } END { print t }')"
+            echo "attempt $attempt: $wasm_url -> HTTP $status, content-type '$type'"
+            if [ "$status" = "200" ] && [[ "$type" == application/wasm* ]]; then ok=1; break; fi
+            sleep 10
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::$wasm_url is not served as application/wasm (HTTP $status, content-type '$type')"
+            printf '%s\n' "$headers"
+            exit 1
+          fi
+          html="$(curl -sSfL --max-time 30 "$base")"
+          if ! grep -q 'id="app"' <<<"$html"; then
+            echo "::error::$base did not return the app's index.html"
+            exit 1
+          fi
+          curl -sSfIL --max-time 30 "${base}${WASM_PATH%.wasm}.js" > /dev/null
+          echo "Deployed $base: index.html OK, engine wasm served as application/wasm."

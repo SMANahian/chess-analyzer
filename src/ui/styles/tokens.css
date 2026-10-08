@@ -1,0 +1,149 @@
+/* Design tokens. Dark is the default; [data-theme="light"] (set by theme.ts / the inline script in
+   index.html) switches. Without JS, prefers-color-scheme picks. All text pairs meet WCAG AA
+   (checked: body text ≥ 15:1, muted ≥ 6.5:1, faint ≥ 4.7:1, links/buttons ≥ 4.8:1). */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg: #161512;
+  --bg-elev: #1b1a17;
+  --surface: #22201d;
+  --surface-2: #2a2825;
+  --surface-3: #34322e;
+  --border: #393632;
+  --border-strong: #4c4842;
+  --overlay: rgb(8 7 6 / 0.62);
+
+  /* Text */
+  --text: #ecebe8;
+  --text-muted: #aaa59d;
+  --text-faint: #8f8a82;
+
+  /* Brand / interactive */
+  --accent: #7ab3ff;
+  --accent-strong: #2f6fd6;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgb(122 179 255 / 0.14);
+  --focus: #9cc7ff;
+
+  /* Status */
+  --good: #5cc488;
+  --good-soft: rgb(92 196 136 / 0.14);
+  --warn: #e9a640;
+  --warn-soft: rgb(233 166 64 / 0.14);
+  --danger: #f2766c;
+  --danger-soft: rgb(242 118 108 / 0.14);
+  --danger-strong: #c8382e;
+
+  /* Severities (Okabe–Ito based, colour-blind safe; always paired with ?! ? ?? and a word) */
+  --sev-inaccuracy: #62bdf0;
+  --sev-mistake: #eaa22a;
+  --sev-blunder: #f0726a;
+  --sev-book: #b9a6e8;
+
+  /* Move semantics in text next to the board: best = blue, your habit = orange (board arrows use the
+     same hues, set in Board.tsx). Text-contrast checked on surface and surface-2. */
+  --move-best: #6aa2fa;
+  --move-habit: #f08c00;
+
+  /* Shape & depth */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-2: 0 8px 28px rgb(0 0 0 / 0.45);
+
+  /* Type */
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif,
+    'Apple Color Emoji', 'Segoe UI Emoji';
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.875rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.125rem;
+  --fs-xl: 1.375rem;
+  --fs-2xl: clamp(1.6rem, 1.1rem + 2vw, 2.4rem);
+
+  /* Space (4px grid) */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+
+  /* Layout */
+  --content-max: 1200px;
+  --header-h: 56px;
+  --tabbar-h: 64px;
+  --touch: 44px;
+  --gutter: 16px;
+
+  --dur: 160ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (min-width: 768px) {
+  :root {
+    --gutter: 24px;
+  }
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f6f5f2;
+  --bg-elev: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f3f1ed;
+  --surface-3: #e9e6e0;
+  --border: #e0dcd5;
+  --border-strong: #c9c4bb;
+  --overlay: rgb(29 27 24 / 0.45);
+
+  --text: #1d1b18;
+  --text-muted: #5c5750;
+  --text-faint: #6f6a63;
+
+  --accent: #1d5fc4;
+  --accent-strong: #1d5fc4;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgb(29 95 196 / 0.09);
+  --focus: #1d5fc4;
+
+  --good: #1e7a46;
+  --good-soft: rgb(30 122 70 / 0.1);
+  --warn: #8a5300;
+  --warn-soft: rgb(196 125 0 / 0.12);
+  --danger: #b42b23;
+  --danger-soft: rgb(180 43 35 / 0.08);
+  --danger-strong: #b42b23;
+
+  --sev-inaccuracy: #0b6a9e;
+  --sev-mistake: #935600;
+  --sev-blunder: #b42b23;
+  --sev-book: #6a4fb3;
+
+  --move-best: #1a62cf;
+  --move-habit: #a35200;
+
+  --shadow-1: 0 1px 2px rgb(29 27 24 / 0.08);
+  --shadow-2: 0 10px 30px rgb(29 27 24 / 0.16);
+}
+
+/* No JS (or before the inline script ran): follow the system. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --bg: #f6f5f2;
+    --bg-elev: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #f3f1ed;
+    --border: #e0dcd5;
+    --text: #1d1b18;
+    --text-muted: #5c5750;
+    --accent: #1d5fc4;
+    --accent-strong: #1d5fc4;
+  }
+}

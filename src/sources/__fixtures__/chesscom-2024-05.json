@@ -1,0 +1,114 @@
+{
+  "games": [
+    {
+      "url": "https://www.chess.com/game/live/108385012345",
+      "pgn": "[Event \"Live Chess\"]\n[Site \"Chess.com\"]\n[Date \"2024.05.02\"]\n[Round \"-\"]\n[White \"BulletBrain\"]\n[Black \"SMA-Nahian\"]\n[Result \"0-1\"]\n[CurrentPosition \"2r2rk1/pp3ppp/1qn1p1n1/3pP3/3P1P2/P3B3/P3B1PP/R2Q1RK1 w - - 1 16\"]\n[Timezone \"UTC\"]\n[ECO \"B12\"]\n[ECOUrl \"https://www.chess.com/openings/Caro-Kann-Defense-Advance-Variation\"]\n[UTCDate \"2024.05.02\"]\n[UTCTime \"23:59:40\"]\n[WhiteElo \"1301\"]\n[BlackElo \"1322\"]\n[TimeControl \"60\"]\n[Termination \"SMA-Nahian won on time\"]\n[StartTime \"23:59:40\"]\n[EndDate \"2024.05.03\"]\n[EndTime \"00:01:36\"]\n[Link \"https://www.chess.com/game/live/108385012345\"]\n\n1. e4 {[%clk 0:01:00]} 1... c6 {[%clk 0:00:58.5]} 2. d4 {[%clk 0:00:59.7]} 2... d5 {[%clk 0:00:55]} 3. e5 {[%clk 0:00:58.8]} 3... Bf5 {[%clk 0:00:53]} 4. Nf3 {[%clk 0:00:56.7]} 4... e6 {[%clk 0:00:49.8]} 5. Be2 {[%clk 0:00:54.2]} 5... c5 {[%clk 0:00:46.3]} 6. O-O {[%clk 0:00:53.3]} 6... Nc6 {[%clk 0:00:45.5]} 7. c3 {[%clk 0:00:51.6]} 7... Qb6 {[%clk 0:00:44.1]} 8. Na3 {[%clk 0:00:48.8]} 8... cxd4 {[%clk 0:00:42.3]} 9. cxd4 {[%clk 0:00:45.5]} 9... Bxa3 {[%clk 0:00:39.5]} 10. bxa3 {[%clk 0:00:43.7]} 10... Nge7 {[%clk 0:00:36.3]} 11. Be3 {[%clk 0:00:42.3]} 11... O-O {[%clk 0:00:34.2]} 12. Nh4 {[%clk 0:00:39.2]} 12... Be4 {[%clk 0:00:32.6]} 13. f3 {[%clk 0:00:38]} 13... Bg6 {[%clk 0:00:30]} 14. Nxg6 {[%clk 0:00:34.8]} 14... Nxg6 {[%clk 0:00:26.9]} 15. f4 {[%clk 0:00:34.2]} 15... Rac8 {[%clk 0:00:26.1]} 0-1\n",
+      "time_control": "60",
+      "end_time": 1714694496,
+      "rated": true,
+      "tcn": "mC0Kgv5Q!TZJbs",
+      "uuid": "9c1e2345-0a7b-11ef-8f3c-6cfe544c0428",
+      "initial_setup": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "fen": "2r2rk1/pp3ppp/1qn1p1n1/3pP3/3P1P2/P3B3/P3B1PP/R2Q1RK1 w - - 1 16",
+      "time_class": "bullet",
+      "rules": "chess",
+      "white": {
+        "rating": 1301,
+        "result": "timeout",
+        "@id": "https://api.chess.com/pub/player/bulletbrain",
+        "username": "BulletBrain",
+        "uuid": "u-bulletbrain"
+      },
+      "black": {
+        "rating": 1322,
+        "result": "win",
+        "@id": "https://api.chess.com/pub/player/sma-nahian",
+        "username": "SMA-Nahian",
+        "uuid": "u-sma-nahian"
+      },
+      "eco": "https://www.chess.com/openings/Caro-Kann-Defense-Advance-Variation"
+    },
+    {
+      "url": "https://www.chess.com/game/live/108400000001",
+      "pgn": "[Event \"Live Chess\"]\n[Site \"Chess.com\"]\n[Date \"2024.05.04\"]\n[Round \"-\"]\n[White \"SMA-Nahian\"]\n[Black \"DropZone\"]\n[Result \"0-1\"]\n[Variant \"Bughouse\"]\n[CurrentPosition \"\"]\n[Timezone \"UTC\"]\n[UTCDate \"2024.05.04\"]\n[UTCTime \"10:10:10\"]\n[WhiteElo \"1200\"]\n[BlackElo \"1210\"]\n[TimeControl \"180\"]\n[Termination \"DropZone won - partner checkmated\"]\n[StartTime \"10:10:10\"]\n[EndDate \"2024.05.04\"]\n[EndTime \"10:13:30\"]\n[Link \"https://www.chess.com/game/live/108400000001\"]\n\n1. e4 {[%clk 0:02:59]} 1... e5 {[%clk 0:02:58]} 2. Nf3 {[%clk 0:02:57]} 2... P@f6 {[%clk 0:02:55]} 0-1\n",
+      "time_control": "180",
+      "end_time": 1714817610,
+      "rated": true,
+      "tcn": "mC0Kgv5Q!TZJbs",
+      "uuid": "9c1e0001-0a7b-11ef-8f3c-6cfe544c0428",
+      "initial_setup": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "fen": "",
+      "time_class": "blitz",
+      "rules": "bughouse",
+      "white": {
+        "rating": 1200,
+        "result": "bughousepartnerlose",
+        "@id": "https://api.chess.com/pub/player/sma-nahian",
+        "username": "SMA-Nahian",
+        "uuid": "u-sma-nahian"
+      },
+      "black": {
+        "rating": 1210,
+        "result": "win",
+        "@id": "https://api.chess.com/pub/player/dropzone",
+        "username": "DropZone",
+        "uuid": "u-dropzone"
+      }
+    },
+    {
+      "url": "https://www.chess.com/game/live/108455500077",
+      "pgn": "[Event \"Live Chess\"]\n[Site \"Chess.com\"]\n[Date \"2024.05.12\"]\n[Round \"-\"]\n[White \"Endgame_Enjoyer\"]\n[Black \"SMA-Nahian\"]\n[Result \"1/2-1/2\"]\n[CurrentPosition \"r2q1rk1/ppp1bppp/2n5/3p1b2/2PP4/P1P2N2/4BPPP/R1BQ1RK1 w - - 1 13\"]\n[Timezone \"UTC\"]\n[ECO \"C42\"]\n[ECOUrl \"https://www.chess.com/openings/Petrovs-Defense\"]\n[WhiteElo \"1480\"]\n[BlackElo \"1515\"]\n[TimeControl \"180+2\"]\n[Termination \"Game drawn by timeout vs insufficient material\"]\n[StartTime \"08:00:00\"]\n[EndDate \"2024.05.12\"]\n[EndTime \"08:06:20\"]\n[Link \"https://www.chess.com/game/live/108455500077\"]\n\n1. e4 {[%clk 0:02:58.4]} 1... e5 {[%clk 0:03:01.5]} 2. Nf3 {[%clk 0:02:59]} 2... Nf6 {[%clk 0:02:56.4]} 3. Nxe5 {[%clk 0:02:52.2]} 3... d6 {[%clk 0:02:55.9]} 4. Nf3 {[%clk 0:02:48.3]} 4... Nxe4 {[%clk 0:02:54.9]} 5. d4 {[%clk 0:02:48.3]} 5... d5 {[%clk 0:02:50.5]} 6. Bd3 {[%clk 0:02:43.4]} 6... Nc6 {[%clk 0:02:42.6]} 7. O-O {[%clk 0:02:35.6]} 7... Be7 {[%clk 0:02:42]} 8. c4 {[%clk 0:02:30.3]} 8... Nb4 {[%clk 0:02:42.8]} 9. Be2 {[%clk 0:02:23.5]} 9... O-O {[%clk 0:02:41.2]} 10. Nc3 {[%clk 0:02:22.2]} 10... Bf5 {[%clk 0:02:35.8]} 11. a3 {[%clk 0:02:23.1]} 11... Nxc3 {[%clk 0:02:28.7]} 12. bxc3 {[%clk 0:02:21.3]} 12... Nc6 {[%clk 0:02:27.8]} 1/2-1/2\n",
+      "time_control": "180+2",
+      "end_time": 1715501180,
+      "rated": false,
+      "tcn": "mC0Kgv5Q!TZJbs",
+      "uuid": "9c1e0077-0a7b-11ef-8f3c-6cfe544c0428",
+      "initial_setup": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "fen": "r2q1rk1/ppp1bppp/2n5/3p1b2/2PP4/P1P2N2/4BPPP/R1BQ1RK1 w - - 1 13",
+      "time_class": "blitz",
+      "rules": "chess",
+      "white": {
+        "rating": 1480,
+        "result": "timevsinsufficient",
+        "@id": "https://api.chess.com/pub/player/endgame_enjoyer",
+        "username": "Endgame_Enjoyer",
+        "uuid": "u-endgame_enjoyer"
+      },
+      "black": {
+        "rating": 1515,
+        "result": "timeout",
+        "@id": "https://api.chess.com/pub/player/sma-nahian",
+        "username": "SMA-Nahian",
+        "uuid": "u-sma-nahian"
+      },
+      "eco": "https://www.chess.com/openings/Petrovs-Defense"
+    },
+    {
+      "url": "https://www.chess.com/game/live/108499999999",
+      "pgn": "[Event \"Live Chess\"]\n[Site \"Chess.com\"]\n[Date \"2024.05.20\"]\n[Round \"-\"]\n[White \"SMA-Nahian\"]\n[Black \"OddsGiver\"]\n[Result \"1-0\"]\n[SetUp \"1\"]\n[FEN \"rnbqkbn1/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQq - 0 1\"]\n[CurrentPosition \"rnbqkbn1/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQq - 0 1\"]\n[Timezone \"UTC\"]\n[UTCDate \"2024.05.20\"]\n[UTCTime \"19:30:00\"]\n[WhiteElo \"1550\"]\n[BlackElo \"1900\"]\n[TimeControl \"600\"]\n[Termination \"SMA-Nahian won by resignation\"]\n[StartTime \"19:30:00\"]\n[EndDate \"2024.05.20\"]\n[EndTime \"19:38:20\"]\n[Link \"https://www.chess.com/game/live/108499999999\"]\n\n1. e4 {[%clk 0:09:58]} 1... e5 {[%clk 0:09:55]} 2. Nf3 {[%clk 0:09:50]} 1-0\n",
+      "time_control": "600",
+      "end_time": 1716233900,
+      "rated": false,
+      "tcn": "mC0Kgv5Q!TZJbs",
+      "uuid": "9c1e9999-0a7b-11ef-8f3c-6cfe544c0428",
+      "initial_setup": "rnbqkbn1/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQq - 0 1",
+      "fen": "rnbqkbn1/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQq - 0 1",
+      "time_class": "rapid",
+      "rules": "chess",
+      "white": {
+        "rating": 1550,
+        "result": "win",
+        "@id": "https://api.chess.com/pub/player/sma-nahian",
+        "username": "SMA-Nahian",
+        "uuid": "u-sma-nahian"
+      },
+      "black": {
+        "rating": 1900,
+        "result": "resigned",
+        "@id": "https://api.chess.com/pub/player/oddsgiver",
+        "username": "OddsGiver",
+        "uuid": "u-oddsgiver"
+      }
+    }
+  ]
+}

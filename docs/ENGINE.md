@@ -40,7 +40,7 @@ Why:
   Every build and MultiPV setting lands at 89.6-90.4% severity agreement at d14.
 - **The fast preset (d10) classifies about as well as d14 but ranks worse.** Class agreement is not significantly different (p=0.34). Its loss MAE is 0.50 points worse ([-0.71, -0.31]), so impact ranking (times played x loss) is noisier. Use it for a quick first pass or slow devices.
 - **"Deep" buys nothing measurable against this reference.** It is 2.8x the balanced cost; offer it as an opt-in only. Lite d18 (MPV 3, run on the 4-engine pool) reached 90.7% at 3.3 s per position per engine, which is also not significantly better.
-- **MultiPV 1 instead of 3.** This changes DESIGN.md section 5, which says "MultiPV k (default 3)".
+- **MultiPV 1 instead of 3.** This changed the first design draft, which used "MultiPV k (default 3)"; `docs/ARCHITECTURE.md` reflects the change.
   - Accuracy is the same: at d14, MPV 1 vs 3 gives McNemar p=0.86 and MAE change +0.05 [-0.10, +0.24]. MPV 3 vs 5 gives p=1.0.
   - MPV 1 is 1.7x faster on this set (d14 median 353 vs 600 ms; d12 125 vs 233 ms), even though it needs more searchmoves searches (3.47 vs 2.57 searches per position).
   - The real app usually has 1-2 candidate moves per position. (derived) From the measured per-search means at d14 (MPV 1 root search 156 ms, MPV 3 root search 531 ms, one searchmoves search 80-92 ms), a 1-candidate position costs 156-248 ms with MPV 1 vs 531-611 ms with MPV 3. That is 2.5-3.4x cheaper.

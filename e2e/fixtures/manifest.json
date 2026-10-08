@@ -1,0 +1,778 @@
+{
+  "generator": "scripts/gen-fixtures.mjs",
+  "seed": 20261008,
+  "repertoire_seed": 20261009,
+  "note": "Planted deviations are shared by all sets (same repertoire). Counts are distinct games.",
+  "repertoire": {
+    "white": [
+      {
+        "eco": "C54",
+        "name": "Italian Game: Classical Variation, Giuoco Pianissimo",
+        "pgn": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. c3 Nf6 5. d3 d6 6. Nbd2 O-O 7. O-O",
+        "uci": [
+          "e2e4",
+          "e7e5",
+          "g1f3",
+          "b8c6",
+          "f1c4",
+          "f8c5",
+          "c2c3",
+          "g8f6",
+          "d2d3",
+          "d7d6",
+          "b1d2",
+          "e8g8",
+          "e1g1"
+        ],
+        "weight": 0.35
+      },
+      {
+        "eco": "B22",
+        "name": "Sicilian Defense: Alapin Variation, Barmen Defense",
+        "pgn": "1. e4 c5 2. c3 d5 3. exd5 Qxd5 4. d4 Nc6 5. Nf3",
+        "uci": [
+          "e2e4",
+          "c7c5",
+          "c2c3",
+          "d7d5",
+          "e4d5",
+          "d8d5",
+          "d2d4",
+          "b8c6",
+          "g1f3"
+        ],
+        "weight": 0.3
+      },
+      {
+        "eco": "C02",
+        "name": "French Defense: Advance Variation, Paulsen Attack",
+        "pgn": "1. e4 e6 2. d4 d5 3. e5 c5 4. c3 Nc6 5. Nf3",
+        "uci": [
+          "e2e4",
+          "e7e6",
+          "d2d4",
+          "d7d5",
+          "e4e5",
+          "c7c5",
+          "c2c3",
+          "b8c6",
+          "g1f3"
+        ],
+        "weight": 0.2
+      },
+      {
+        "eco": "B12",
+        "name": "Caro-Kann Defense: Advance Variation, Short Variation",
+        "pgn": "1. e4 c6 2. d4 d5 3. e5 Bf5 4. Nf3",
+        "uci": [
+          "e2e4",
+          "c7c6",
+          "d2d4",
+          "d7d5",
+          "e4e5",
+          "c8f5",
+          "g1f3"
+        ],
+        "weight": 0.15
+      }
+    ],
+    "black": [
+      {
+        "eco": "B90",
+        "name": "Sicilian Defense: Najdorf Variation, English Attack",
+        "pgn": "1. e4 c5 2. Nf3 d6 3. d4 cxd4 4. Nxd4 Nf6 5. Nc3 a6 6. Be3 e5 7. Nb3 Be6 8. f3",
+        "uci": [
+          "e2e4",
+          "c7c5",
+          "g1f3",
+          "d7d6",
+          "d2d4",
+          "c5d4",
+          "f3d4",
+          "g8f6",
+          "b1c3",
+          "a7a6",
+          "c1e3",
+          "e7e5",
+          "d4b3",
+          "c8e6",
+          "f2f3"
+        ],
+        "weight": 0.4
+      },
+      {
+        "eco": "E94",
+        "name": "King's Indian Defense: Orthodox Variation",
+        "pgn": "1. d4 Nf6 2. c4 g6 3. Nc3 Bg7 4. e4 d6 5. Nf3 O-O 6. Be2 e5 7. O-O",
+        "uci": [
+          "d2d4",
+          "g8f6",
+          "c2c4",
+          "g7g6",
+          "b1c3",
+          "f8g7",
+          "e2e4",
+          "d7d6",
+          "g1f3",
+          "e8g8",
+          "f1e2",
+          "e7e5",
+          "e1g1"
+        ],
+        "weight": 0.25
+      },
+      {
+        "eco": "A48",
+        "name": "London System, with Be2",
+        "pgn": "1. d4 Nf6 2. Nf3 g6 3. Bf4 Bg7 4. e3 d6 5. Be2 O-O",
+        "uci": [
+          "d2d4",
+          "g8f6",
+          "g1f3",
+          "g7g6",
+          "c1f4",
+          "f8g7",
+          "e2e3",
+          "d7d6",
+          "f1e2",
+          "e8g8"
+        ],
+        "weight": 0.2
+      },
+      {
+        "eco": "A15",
+        "name": "English Opening: Anglo-Indian Defense, King's Indian Formation",
+        "pgn": "1. c4 Nf6 2. Nf3 g6",
+        "uci": [
+          "c2c4",
+          "g8f6",
+          "g1f3",
+          "g7g6"
+        ],
+        "weight": 0.15
+      }
+    ]
+  },
+  "lichess": {
+    "file": "lichess-games.ndjson",
+    "hero": "TestHero",
+    "count": 400,
+    "first_created_at": 1785532771766,
+    "last_created_at": 1790798039942,
+    "colors": {
+      "black": 202,
+      "white": 198
+    },
+    "speeds": {
+      "blitz": 241,
+      "bullet": 63,
+      "rapid": 96
+    },
+    "modes": {
+      "exp": 120,
+      "rep": 280
+    },
+    "planted": [
+      {
+        "color": "white",
+        "line": "French Defense: Advance Variation, Paulsen Attack",
+        "line_eco": "C02",
+        "ply": 8,
+        "fen": "r1bqkbnr/pp3ppp/2n1p3/2ppP3/3P4/2P5/PP3PPP/RNBQKBNR w KQkq - 1 5",
+        "epd": "r1bqkbnr/pp3ppp/2n1p3/2ppP3/3P4/2P5/PP3PPP/RNBQKBNR w KQkq -",
+        "repertoire_move": "g1f3",
+        "move_uci": "c1h6",
+        "move_san": "Bh6",
+        "kind": "hangs_material",
+        "hangs": "bishop",
+        "hangs_value": 3,
+        "probability": 0.47,
+        "times_reached": 21,
+        "times_played": 11,
+        "newest": {
+          "games": 300,
+          "reached": 19,
+          "played": 9
+        }
+      },
+      {
+        "color": "white",
+        "line": "French Defense: Advance Variation, Paulsen Attack",
+        "line_eco": "C02",
+        "ply": 6,
+        "fen": "rnbqkbnr/pp3ppp/4p3/2ppP3/3P4/8/PPP2PPP/RNBQKBNR w KQkq - 0 4",
+        "epd": "rnbqkbnr/pp3ppp/4p3/2ppP3/3P4/8/PPP2PPP/RNBQKBNR w KQkq -",
+        "repertoire_move": "c2c3",
+        "move_uci": "g2g3",
+        "move_san": "g3",
+        "kind": "offbook",
+        "probability": 0.4,
+        "times_reached": 25,
+        "times_played": 3,
+        "newest": {
+          "games": 300,
+          "reached": 22,
+          "played": 3
+        }
+      },
+      {
+        "color": "white",
+        "line": "Italian Game: Classical Variation, Giuoco Pianissimo",
+        "line_eco": "C54",
+        "ply": 4,
+        "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+        "epd": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq -",
+        "repertoire_move": "f1c4",
+        "move_uci": "f3g5",
+        "move_san": "Ng5",
+        "kind": "hangs_material",
+        "hangs": "knight",
+        "hangs_value": 3,
+        "probability": 0.41,
+        "times_reached": 40,
+        "times_played": 12,
+        "newest": {
+          "games": 300,
+          "reached": 33,
+          "played": 12
+        }
+      },
+      {
+        "color": "white",
+        "line": "Caro-Kann Defense: Advance Variation, Short Variation",
+        "line_eco": "B12",
+        "ply": 4,
+        "fen": "rnbqkbnr/pp2pppp/2p5/3p4/3PP3/8/PPP2PPP/RNBQKBNR w KQkq - 0 3",
+        "epd": "rnbqkbnr/pp2pppp/2p5/3p4/3PP3/8/PPP2PPP/RNBQKBNR w KQkq -",
+        "repertoire_move": "e4e5",
+        "move_uci": "d1f3",
+        "move_san": "Qf3",
+        "kind": "offbook",
+        "probability": 0.5,
+        "times_reached": 18,
+        "times_played": 9,
+        "newest": {
+          "games": 300,
+          "reached": 15,
+          "played": 7
+        }
+      },
+      {
+        "color": "white",
+        "line": "Italian Game: Classical Variation, Giuoco Pianissimo",
+        "line_eco": "C54",
+        "ply": 8,
+        "fen": "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2P2N2/PP1P1PPP/RNBQK2R w KQkq - 1 5",
+        "epd": "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2P2N2/PP1P1PPP/RNBQK2R w KQkq -",
+        "repertoire_move": "d2d3",
+        "move_uci": "f3e5",
+        "move_san": "Nxe5",
+        "kind": "hangs_material",
+        "hangs": "knight",
+        "hangs_value": 3,
+        "probability": 0.45,
+        "times_reached": 21,
+        "times_played": 12,
+        "newest": {
+          "games": 300,
+          "reached": 15,
+          "played": 9
+        }
+      },
+      {
+        "color": "black",
+        "line": "King's Indian Defense: Orthodox Variation",
+        "line_eco": "E94",
+        "ply": 3,
+        "fen": "rnbqkb1r/pppppppp/5n2/8/2PP4/8/PP2PPPP/RNBQKBNR b KQkq - 0 2",
+        "epd": "rnbqkb1r/pppppppp/5n2/8/2PP4/8/PP2PPPP/RNBQKBNR b KQkq -",
+        "repertoire_move": "g7g6",
+        "move_uci": "g7g5",
+        "move_san": "g5",
+        "kind": "hangs_material",
+        "hangs": "pawn",
+        "hangs_value": 1,
+        "probability": 0.47,
+        "times_reached": 56,
+        "times_played": 21,
+        "newest": {
+          "games": 300,
+          "reached": 39,
+          "played": 13
+        }
+      },
+      {
+        "color": "black",
+        "line": "Sicilian Defense: Najdorf Variation, English Attack",
+        "line_eco": "B90",
+        "ply": 7,
+        "fen": "rnbqkbnr/pp2pppp/3p4/8/3NP3/8/PPP2PPP/RNBQKB1R b KQkq - 0 4",
+        "epd": "rnbqkbnr/pp2pppp/3p4/8/3NP3/8/PPP2PPP/RNBQKB1R b KQkq -",
+        "repertoire_move": "g8f6",
+        "move_uci": "b7b6",
+        "move_san": "b6",
+        "kind": "offbook",
+        "probability": 0.43,
+        "times_reached": 16,
+        "times_played": 6,
+        "newest": {
+          "games": 300,
+          "reached": 13,
+          "played": 5
+        }
+      },
+      {
+        "color": "black",
+        "line": "King's Indian Defense: Orthodox Variation",
+        "line_eco": "E94",
+        "ply": 7,
+        "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq - 0 4",
+        "epd": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq -",
+        "repertoire_move": "d7d6",
+        "move_uci": "g7h6",
+        "move_san": "Bh6",
+        "kind": "hangs_material",
+        "hangs": "bishop",
+        "hangs_value": 3,
+        "probability": 0.47,
+        "times_reached": 21,
+        "times_played": 15,
+        "newest": {
+          "games": 300,
+          "reached": 15,
+          "played": 13
+        }
+      },
+      {
+        "color": "black",
+        "line": "London System, with Be2",
+        "line_eco": "A48",
+        "ply": 9,
+        "fen": "rnbqk2r/ppp1ppbp/3p1np1/8/3P1B2/4PN2/PPP1BPPP/RN1QK2R b KQkq - 1 5",
+        "epd": "rnbqk2r/ppp1ppbp/3p1np1/8/3P1B2/4PN2/PPP1BPPP/RN1QK2R b KQkq -",
+        "repertoire_move": "e8g8",
+        "move_uci": "f6g4",
+        "move_san": "Ng4",
+        "kind": "offbook",
+        "probability": 0.57,
+        "times_reached": 14,
+        "times_played": 9,
+        "newest": {
+          "games": 300,
+          "reached": 11,
+          "played": 7
+        }
+      },
+      {
+        "color": "black",
+        "line": "Sicilian Defense: Najdorf Variation, English Attack",
+        "line_eco": "B90",
+        "ply": 5,
+        "fen": "rnbqkbnr/pp2pppp/3p4/2p5/3PP3/5N2/PPP2PPP/RNBQKB1R b KQkq - 0 3",
+        "epd": "rnbqkbnr/pp2pppp/3p4/2p5/3PP3/5N2/PPP2PPP/RNBQKB1R b KQkq -",
+        "repertoire_move": "c5d4",
+        "move_uci": "c8h3",
+        "move_san": "Bh3",
+        "kind": "hangs_material",
+        "hangs": "bishop",
+        "hangs_value": 3,
+        "probability": 0.54,
+        "times_reached": 34,
+        "times_played": 18,
+        "newest": {
+          "games": 300,
+          "reached": 25,
+          "played": 12
+        }
+      }
+    ]
+  },
+  "chesscom": {
+    "dir": "chesscom",
+    "username": "testhero",
+    "hero": "TestHero",
+    "archives": [
+      "2026-06.json",
+      "2026-07.json",
+      "2026-08.json",
+      "2026-09.json"
+    ],
+    "skipped": 3,
+    "count": 150,
+    "first_created_at": 1782793228567,
+    "last_created_at": 1790797896483,
+    "colors": {
+      "black": 71,
+      "white": 79
+    },
+    "speeds": {
+      "blitz": 92,
+      "bullet": 25,
+      "rapid": 33
+    },
+    "modes": {
+      "exp": 45,
+      "rep": 105
+    },
+    "planted": [
+      {
+        "color": "white",
+        "line": "French Defense: Advance Variation, Paulsen Attack",
+        "line_eco": "C02",
+        "ply": 8,
+        "fen": "r1bqkbnr/pp3ppp/2n1p3/2ppP3/3P4/2P5/PP3PPP/RNBQKBNR w KQkq - 1 5",
+        "epd": "r1bqkbnr/pp3ppp/2n1p3/2ppP3/3P4/2P5/PP3PPP/RNBQKBNR w KQkq -",
+        "repertoire_move": "g1f3",
+        "move_uci": "c1h6",
+        "move_san": "Bh6",
+        "kind": "hangs_material",
+        "hangs": "bishop",
+        "hangs_value": 3,
+        "probability": 0.47,
+        "times_reached": 6,
+        "times_played": 3
+      },
+      {
+        "color": "white",
+        "line": "French Defense: Advance Variation, Paulsen Attack",
+        "line_eco": "C02",
+        "ply": 6,
+        "fen": "rnbqkbnr/pp3ppp/4p3/2ppP3/3P4/8/PPP2PPP/RNBQKBNR w KQkq - 0 4",
+        "epd": "rnbqkbnr/pp3ppp/4p3/2ppP3/3P4/8/PPP2PPP/RNBQKBNR w KQkq -",
+        "repertoire_move": "c2c3",
+        "move_uci": "g2g3",
+        "move_san": "g3",
+        "kind": "offbook",
+        "probability": 0.4,
+        "times_reached": 9,
+        "times_played": 3
+      },
+      {
+        "color": "white",
+        "line": "Italian Game: Classical Variation, Giuoco Pianissimo",
+        "line_eco": "C54",
+        "ply": 4,
+        "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+        "epd": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq -",
+        "repertoire_move": "f1c4",
+        "move_uci": "f3g5",
+        "move_san": "Ng5",
+        "kind": "hangs_material",
+        "hangs": "knight",
+        "hangs_value": 3,
+        "probability": 0.41,
+        "times_reached": 16,
+        "times_played": 8
+      },
+      {
+        "color": "white",
+        "line": "Caro-Kann Defense: Advance Variation, Short Variation",
+        "line_eco": "B12",
+        "ply": 4,
+        "fen": "rnbqkbnr/pp2pppp/2p5/3p4/3PP3/8/PPP2PPP/RNBQKBNR w KQkq - 0 3",
+        "epd": "rnbqkbnr/pp2pppp/2p5/3p4/3PP3/8/PPP2PPP/RNBQKBNR w KQkq -",
+        "repertoire_move": "e4e5",
+        "move_uci": "d1f3",
+        "move_san": "Qf3",
+        "kind": "offbook",
+        "probability": 0.5,
+        "times_reached": 5,
+        "times_played": 3
+      },
+      {
+        "color": "white",
+        "line": "Italian Game: Classical Variation, Giuoco Pianissimo",
+        "line_eco": "C54",
+        "ply": 8,
+        "fen": "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2P2N2/PP1P1PPP/RNBQK2R w KQkq - 1 5",
+        "epd": "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2P2N2/PP1P1PPP/RNBQK2R w KQkq -",
+        "repertoire_move": "d2d3",
+        "move_uci": "f3e5",
+        "move_san": "Nxe5",
+        "kind": "hangs_material",
+        "hangs": "knight",
+        "hangs_value": 3,
+        "probability": 0.45,
+        "times_reached": 5,
+        "times_played": 0
+      },
+      {
+        "color": "black",
+        "line": "King's Indian Defense: Orthodox Variation",
+        "line_eco": "E94",
+        "ply": 3,
+        "fen": "rnbqkb1r/pppppppp/5n2/8/2PP4/8/PP2PPPP/RNBQKBNR b KQkq - 0 2",
+        "epd": "rnbqkb1r/pppppppp/5n2/8/2PP4/8/PP2PPPP/RNBQKBNR b KQkq -",
+        "repertoire_move": "g7g6",
+        "move_uci": "g7g5",
+        "move_san": "g5",
+        "kind": "hangs_material",
+        "hangs": "pawn",
+        "hangs_value": 1,
+        "probability": 0.47,
+        "times_reached": 17,
+        "times_played": 7
+      },
+      {
+        "color": "black",
+        "line": "Sicilian Defense: Najdorf Variation, English Attack",
+        "line_eco": "B90",
+        "ply": 7,
+        "fen": "rnbqkbnr/pp2pppp/3p4/8/3NP3/8/PPP2PPP/RNBQKB1R b KQkq - 0 4",
+        "epd": "rnbqkbnr/pp2pppp/3p4/8/3NP3/8/PPP2PPP/RNBQKB1R b KQkq -",
+        "repertoire_move": "g8f6",
+        "move_uci": "b7b6",
+        "move_san": "b6",
+        "kind": "offbook",
+        "probability": 0.43,
+        "times_reached": 10,
+        "times_played": 2
+      },
+      {
+        "color": "black",
+        "line": "King's Indian Defense: Orthodox Variation",
+        "line_eco": "E94",
+        "ply": 7,
+        "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq - 0 4",
+        "epd": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq -",
+        "repertoire_move": "d7d6",
+        "move_uci": "g7h6",
+        "move_san": "Bh6",
+        "kind": "hangs_material",
+        "hangs": "bishop",
+        "hangs_value": 3,
+        "probability": 0.47,
+        "times_reached": 7,
+        "times_played": 4
+      },
+      {
+        "color": "black",
+        "line": "London System, with Be2",
+        "line_eco": "A48",
+        "ply": 9,
+        "fen": "rnbqk2r/ppp1ppbp/3p1np1/8/3P1B2/4PN2/PPP1BPPP/RN1QK2R b KQkq - 1 5",
+        "epd": "rnbqk2r/ppp1ppbp/3p1np1/8/3P1B2/4PN2/PPP1BPPP/RN1QK2R b KQkq -",
+        "repertoire_move": "e8g8",
+        "move_uci": "f6g4",
+        "move_san": "Ng4",
+        "kind": "offbook",
+        "probability": 0.57,
+        "times_reached": 5,
+        "times_played": 2
+      },
+      {
+        "color": "black",
+        "line": "Sicilian Defense: Najdorf Variation, English Attack",
+        "line_eco": "B90",
+        "ply": 5,
+        "fen": "rnbqkbnr/pp2pppp/3p4/2p5/3PP3/5N2/PPP2PPP/RNBQKB1R b KQkq - 0 3",
+        "epd": "rnbqkbnr/pp2pppp/3p4/2p5/3PP3/5N2/PPP2PPP/RNBQKB1R b KQkq -",
+        "repertoire_move": "c5d4",
+        "move_uci": "c8h3",
+        "move_san": "Bh3",
+        "kind": "hangs_material",
+        "hangs": "bishop",
+        "hangs_value": 3,
+        "probability": 0.54,
+        "times_reached": 19,
+        "times_played": 9
+      }
+    ]
+  },
+  "pgn": {
+    "file": "upload.pgn",
+    "hero": "Hero, Test",
+    "count": 120,
+    "first_created_at": 1783966195419,
+    "last_created_at": 1790797612949,
+    "colors": {
+      "black": 62,
+      "white": 58
+    },
+    "speeds": {
+      "blitz": 63,
+      "bullet": 20,
+      "rapid": 37
+    },
+    "modes": {
+      "exp": 37,
+      "rep": 83
+    },
+    "skipped": 1,
+    "planted": [
+      {
+        "color": "white",
+        "line": "French Defense: Advance Variation, Paulsen Attack",
+        "line_eco": "C02",
+        "ply": 8,
+        "fen": "r1bqkbnr/pp3ppp/2n1p3/2ppP3/3P4/2P5/PP3PPP/RNBQKBNR w KQkq - 1 5",
+        "epd": "r1bqkbnr/pp3ppp/2n1p3/2ppP3/3P4/2P5/PP3PPP/RNBQKBNR w KQkq -",
+        "repertoire_move": "g1f3",
+        "move_uci": "c1h6",
+        "move_san": "Bh6",
+        "kind": "hangs_material",
+        "hangs": "bishop",
+        "hangs_value": 3,
+        "probability": 0.47,
+        "times_reached": 5,
+        "times_played": 3
+      },
+      {
+        "color": "white",
+        "line": "French Defense: Advance Variation, Paulsen Attack",
+        "line_eco": "C02",
+        "ply": 6,
+        "fen": "rnbqkbnr/pp3ppp/4p3/2ppP3/3P4/8/PPP2PPP/RNBQKBNR w KQkq - 0 4",
+        "epd": "rnbqkbnr/pp3ppp/4p3/2ppP3/3P4/8/PPP2PPP/RNBQKBNR w KQkq -",
+        "repertoire_move": "c2c3",
+        "move_uci": "g2g3",
+        "move_san": "g3",
+        "kind": "offbook",
+        "probability": 0.4,
+        "times_reached": 6,
+        "times_played": 1
+      },
+      {
+        "color": "white",
+        "line": "Italian Game: Classical Variation, Giuoco Pianissimo",
+        "line_eco": "C54",
+        "ply": 4,
+        "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+        "epd": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq -",
+        "repertoire_move": "f1c4",
+        "move_uci": "f3g5",
+        "move_san": "Ng5",
+        "kind": "hangs_material",
+        "hangs": "knight",
+        "hangs_value": 3,
+        "probability": 0.41,
+        "times_reached": 18,
+        "times_played": 6
+      },
+      {
+        "color": "white",
+        "line": "Caro-Kann Defense: Advance Variation, Short Variation",
+        "line_eco": "B12",
+        "ply": 4,
+        "fen": "rnbqkbnr/pp2pppp/2p5/3p4/3PP3/8/PPP2PPP/RNBQKBNR w KQkq - 0 3",
+        "epd": "rnbqkbnr/pp2pppp/2p5/3p4/3PP3/8/PPP2PPP/RNBQKBNR w KQkq -",
+        "repertoire_move": "e4e5",
+        "move_uci": "d1f3",
+        "move_san": "Qf3",
+        "kind": "offbook",
+        "probability": 0.5,
+        "times_reached": 5,
+        "times_played": 5
+      },
+      {
+        "color": "white",
+        "line": "Italian Game: Classical Variation, Giuoco Pianissimo",
+        "line_eco": "C54",
+        "ply": 8,
+        "fen": "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2P2N2/PP1P1PPP/RNBQK2R w KQkq - 1 5",
+        "epd": "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2P2N2/PP1P1PPP/RNBQK2R w KQkq -",
+        "repertoire_move": "d2d3",
+        "move_uci": "f3e5",
+        "move_san": "Nxe5",
+        "kind": "hangs_material",
+        "hangs": "knight",
+        "hangs_value": 3,
+        "probability": 0.45,
+        "times_reached": 11,
+        "times_played": 5
+      },
+      {
+        "color": "black",
+        "line": "King's Indian Defense: Orthodox Variation",
+        "line_eco": "E94",
+        "ply": 3,
+        "fen": "rnbqkb1r/pppppppp/5n2/8/2PP4/8/PP2PPPP/RNBQKBNR b KQkq - 0 2",
+        "epd": "rnbqkb1r/pppppppp/5n2/8/2PP4/8/PP2PPPP/RNBQKBNR b KQkq -",
+        "repertoire_move": "g7g6",
+        "move_uci": "g7g5",
+        "move_san": "g5",
+        "kind": "hangs_material",
+        "hangs": "pawn",
+        "hangs_value": 1,
+        "probability": 0.47,
+        "times_reached": 14,
+        "times_played": 5
+      },
+      {
+        "color": "black",
+        "line": "Sicilian Defense: Najdorf Variation, English Attack",
+        "line_eco": "B90",
+        "ply": 7,
+        "fen": "rnbqkbnr/pp2pppp/3p4/8/3NP3/8/PPP2PPP/RNBQKB1R b KQkq - 0 4",
+        "epd": "rnbqkbnr/pp2pppp/3p4/8/3NP3/8/PPP2PPP/RNBQKB1R b KQkq -",
+        "repertoire_move": "g8f6",
+        "move_uci": "b7b6",
+        "move_san": "b6",
+        "kind": "offbook",
+        "probability": 0.43,
+        "times_reached": 8,
+        "times_played": 3
+      },
+      {
+        "color": "black",
+        "line": "King's Indian Defense: Orthodox Variation",
+        "line_eco": "E94",
+        "ply": 7,
+        "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq - 0 4",
+        "epd": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq -",
+        "repertoire_move": "d7d6",
+        "move_uci": "g7h6",
+        "move_san": "Bh6",
+        "kind": "hangs_material",
+        "hangs": "bishop",
+        "hangs_value": 3,
+        "probability": 0.47,
+        "times_reached": 4,
+        "times_played": 2
+      },
+      {
+        "color": "black",
+        "line": "London System, with Be2",
+        "line_eco": "A48",
+        "ply": 9,
+        "fen": "rnbqk2r/ppp1ppbp/3p1np1/8/3P1B2/4PN2/PPP1BPPP/RN1QK2R b KQkq - 1 5",
+        "epd": "rnbqk2r/ppp1ppbp/3p1np1/8/3P1B2/4PN2/PPP1BPPP/RN1QK2R b KQkq -",
+        "repertoire_move": "e8g8",
+        "move_uci": "f6g4",
+        "move_san": "Ng4",
+        "kind": "offbook",
+        "probability": 0.57,
+        "times_reached": 7,
+        "times_played": 3
+      },
+      {
+        "color": "black",
+        "line": "Sicilian Defense: Najdorf Variation, English Attack",
+        "line_eco": "B90",
+        "ply": 5,
+        "fen": "rnbqkbnr/pp2pppp/3p4/2p5/3PP3/5N2/PPP2PPP/RNBQKB1R b KQkq - 0 3",
+        "epd": "rnbqkbnr/pp2pppp/3p4/2p5/3PP3/5N2/PPP2PPP/RNBQKB1R b KQkq -",
+        "repertoire_move": "c5d4",
+        "move_uci": "c8h3",
+        "move_san": "Bh3",
+        "kind": "hangs_material",
+        "hangs": "bishop",
+        "hangs_value": 3,
+        "probability": 0.54,
+        "times_reached": 13,
+        "times_played": 5
+      }
+    ]
+  },
+  "sha256": {
+    "lichess-games.ndjson": "06fbfd5e1fa73341ccc57158ff4b3c87f11d0a880c82ce2fab6f5ca7963d17af",
+    "lichess-user.json": "291fed3df41dfe0d16522721bde4dfba9d12eddd33b60c9cdae04d30d30538f0",
+    "chesscom/player.json": "f6ea0d2537f55108a7b2262e4d8fdb1a2a1b199de2d87dc402af854979de7366",
+    "chesscom/archives.json": "c0f1086be51ff7672d689dc97edcb0f1cceeb30e720a294b5589430b8c09cee1",
+    "chesscom/2026-06.json": "86ce6e9cf794b0082cb3d264eb193005c37340e2f3aed7f7ad622dd60d1f4cc7",
+    "chesscom/2026-07.json": "7398abd1a9ed90fae3befe3d46addc8cbed1d3e1b0819700fab1fc53343f4b21",
+    "chesscom/2026-08.json": "8b584f0902aa1dd1cbbdc0e628118469ec69e27b30ad60270636779c498f42e9",
+    "chesscom/2026-09.json": "18acfe647f96829eb7d2f2efa34d523a9b423a5a855280232e11d22934e4d51e",
+    "upload.pgn": "ee0e80fd2e4114813751d48ecb63e6668915c48be44f687e3fa15ff2b2840674"
+  }
+}

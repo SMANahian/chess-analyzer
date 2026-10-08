@@ -25,6 +25,14 @@ export function posKey(pos: Position): string {
   return makeFen(pos.toSetup(), { epd: true });
 }
 
+const START_KEY = posKey(Chess.default());
+
+/** True when `fen` (full FEN or EPD; Shredder castling allowed) is the standard starting position. */
+export function isStandardStartFen(fen: string): boolean {
+  const pos = posFromFen(fen.trim().split(/\s+/).join(' '));
+  return pos !== undefined && posKey(pos) === START_KEY;
+}
+
 export function fenOf(pos: Position): string {
   return makeFen(pos.toSetup());
 }
